@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>سوبر ماركت برو | نظام متكامل</title>
+    
+    <!-- PWA Manifest -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="سوبر ماركت برو">
+    <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Ccircle cx='96' cy='96' r='96' fill='%23667eea'/%3E%3Ctext x='96' y='120' font-size='60' font-family='Arial' font-weight='bold' fill='%23ffffff' text-anchor='middle'%3E🏪%3C/text%3E%3C/svg%3E">
+    <meta name="theme-color" content="#667eea">
+    
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <style>
+        body { visibility: hidden; }
+        body.loaded { visibility: visible; }
+        .demo-info { display: none; }
+        
+        .payment-method {
+            padding: 15px;
+            background: #f5f5f5;
+            border-radius: 10px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .payment-method.active {
+            background: #667eea;
+            color: white;
+        }
+        .payment-method input {
+            display: none;
+        }
+        .payment-method i {
+            display: block;
+            font-size: 24px;
+            margin-bottom: 5px;
+        }
+        
+        .nav-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 15px;
+            color: #2c3e50;
+            text-decoration: none;
+            border-radius: 10px;
+            margin-bottom: 5px;
+            transition: all 0.3s;
+            cursor: pointer;
+        }
+        .nav-item.active {
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            color: white;
+        }
+        .nav-item.active i {
+            color: white;
+        }
+        
+        .product-card {
+            background: #f5f5f5;
+            border-radius: 10px;
+            padding: 15px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .product-card:hover {
+            background: #667eea;
+            color: white;
+            transform: scale(1.05);
+        }
+        
+        .install-banner {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            right: 20px;
+            background: #667eea;
+            color: white;
+            padding: 15px 20px;
+            border-radius: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            z-index: 9999;
+            box-shadow: 0 5px 20px rgba(0,0,0,0.3);
+            animation: slideUp 0.5s;
+        }
+        
+        .install-banner.hidden {
+            display: none;
+        }
+        
+        .install-btn {
+            background: white;
+            color: #667eea;
+            border: none;
+            padding: 10px 25px;
+            border-radius: 25px;
+            font-weight: bold;
+            cursor: pointer;
+            font-family: 'Cairo', sans-serif;
+            font-size: 14px;
+        }
+        
+        @keyframes slideUp {
+            from { transform: translateY(100px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+    </style>
+</head>
+<body>
+    <!-- شاشة تسجيل الدخول -->
+    <div id="loginScreen" class="screen active">
+        <div class="login-container">
+            <div class="login-left">
+                <div class="login-animation">
+                    <i class="fas fa-store floating"></i>
+                    <h1>نظام سوبر ماركت برو</h1>
+                    <p>الحل المتكامل لإدارة محلك باحترافية</p>
+                </div>
+            </div>
+            <div class="login-right">
+                <div class="login-card glass-effect">
+                    <div class="login-header">
+                        <i class="fas fa-user-circle"></i>
+                        <h2>تسجيل الدخول</h2>
+                    </div>
+                    
+                    <div id="loginForm">
+                        <div class="input-group-modern">
+                            <i class="fas fa-user"></i>
+                            <input type="text" id="username" placeholder="اسم المستخدم" value="admin">
+                            <span class="input-highlight"></span>
+                        </div>
+                        <div class="input-group-modern">
+                            <i class="fas fa-lock"></i>
+                            <input type="password" id="password" placeholder="كلمة المرور" value="123456">
+                            <i class="fas fa-eye toggle-password" onclick="app.togglePassword('password')"></i>
+                            <span class="input-highlight"></span>
+                        </div>
+                        
+                        <div class="login-options">
+                            <label class="checkbox-modern">
+                                <input type="checkbox" id="rememberMe"> تذكرني
+                            </label>
+                            <a onclick="app.showForgotPasswordForm()">نسيت كلمة السر؟</a>
+                        </div>
+                        
+                        <button onclick="app.login()" class="btn-primary-modern">
+                            <span>دخول</span>
+                            <i class="fas fa-arrow-left"></i>
+                        </button>
+                        
+                        <div class="login-footer">
+                            <button onclick="app.showRegisterForm()" class="btn-text">إنشاء حساب جديد</button>
+                        </div>
+                    </div>
+                    
+                    <div id="forgotForm" style="display:none;">
+                        <h3>استعادة كلمة السر</h3>
+                        <div id="step1">
+                            <div class="input-group-modern">
+                                <i class="fas fa-user"></i>
+                                <input type="text" id="resetUsername" placeholder="اسم المستخدم">
+                            </div>
+                            <div class="input-group-modern">
+                                <i class="fas fa-envelope"></i>
+                                <input type="email" id="resetEmail" placeholder="البريد الإلكتروني">
+                            </div>
+                            <button onclick="app.requestResetCode()" class="btn-primary-modern">إرسال الكود</button>
+                        </div>
+                        <div id="step2" style="display:none;">
+                            <div class="input-group-modern">
+                                <i class="fas fa-key"></i>
+                                <input type="text" id="resetCode" placeholder="كود التحقق">
+                            </div>
+                            <div class="input-group-modern">
+                                <i class="fas fa-lock"></i>
+                                <input type="password" id="resetNewPassword" placeholder="كلمة السر الجديدة">
+                            </div>
+                            <button onclick="app.confirmResetPassword()" class="btn-primary-modern">تغيير كلمة السر</button>
+                        </div>
+                        <button onclick="app.showLoginForm()" class="btn-text">العودة</button>
+                    </div>
+                    
+                    <div id="registerForm" style="display:none;">
+                        <h3>إنشاء حساب جديد</h3>
+                        <div class="input-group-modern">
+                            <i class="fas fa-user"></i>
+                            <input type="text" id="regName" placeholder="الاسم الكامل">
+                        </div>
+                        <div class="input-group-modern">
+                            <i class="fas fa-user-circle"></i>
+                            <input type="text" id="regUsername" placeholder="اسم المستخدم">
+                        </div>
+                        <div class="input-group-modern">
+                            <i class="fas fa-lock"></i>
+                            <input type="password" id="regPassword" placeholder="كلمة المرور">
+                            <i class="fas fa-eye toggle-password" onclick="app.togglePassword('regPassword')"></i>
+                        </div>
+                        <button onclick="app.register()" class="btn-primary-modern">تسجيل</button>
+                        <button onclick="app.showLoginForm()" class="btn-text">العودة</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- لوحة التحكم الرئيسية -->
+    <div id="mainDashboard" class="dashboard-modern hidden">
+        <div class="top-bar">
+            <div class="top-bar-left">
+                <button class="menu-toggle" onclick="app.toggleSidebar()">
+                    <i class="fas fa-bars"></i>
+                </button>
+                <div class="branch-info">
+                    <i class="fas fa-store-alt"></i>
+                    <span id="currentBranchName">الفرع الرئيسي</span>
+                </div>
+            </div>
+            
+            <div class="top-bar-right">
+                <div class="user-profile" onclick="app.toggleUserMenu()">
+                    <i class="fas fa-user-circle" style="font-size: 35px; color: #667eea;"></i>
+                    <span id="userNameDisplay">مدير النظام</span>
+                    <i class="fas fa-chevron-down"></i>
+                    <div class="user-menu hidden" id="userMenu">
+                        <a onclick="app.showSection('settings')"><i class="fas fa-cog"></i> الإعدادات</a>
+                        <hr>
+                        <a onclick="app.logout()"><i class="fas fa-sign-out-alt"></i> تسجيل الخروج</a>
+                    </div>
+                </div>
+                
+                <button class="theme-toggle" onclick="app.toggleTheme()">
+                    <i class="fas fa-moon"></i>
+                </button>
+            </div>
+        </div>
+        
+        <div class="dashboard-container">
+            <div class="sidebar-modern" id="sidebar">
+                <div class="sidebar-header">
+                    <i class="fas fa-store"></i>
+                    <h3>سوبر ماركت برو</h3>
+                </div>
+                
+                <nav class="sidebar-nav">
+                    <a class="nav-item active" onclick="app.showSection('dashboard')">
+                        <i class="fas fa-chart-pie"></i>
+                        <span>لوحة التحكم</span>
+                    </a>
+                    
+                    <a class="nav-item" onclick="app.showSection('cashier')">
+                        <i class="fas fa-cash-register"></i>
+                        <span>الكاشير</span>
+                    </a>
+                    
+                    <div class="nav-group">
+                        <div class="nav-group-title">إدارة المخزون</div>
+                        <a class="nav-item" onclick="app.showSection('inventory')">
+                            <i class="fas fa-boxes"></i>
+                            <span>الجرد والمنتجات</span>
+                        </a>
+                        <a class="nav-item" onclick="app.showSection('stockControl')">
+                            <i class="fas fa-chart-line"></i>
+                            <span>مراقبة المخزون</span>
+                        </a>
+                    </div>
+                    
+                    <div class="nav-group">
+                        <div class="nav-group-title">العملاء</div>
+                        <a class="nav-item" onclick="app.showSection('customers')">
+                            <i class="fas fa-users"></i>
+                            <span>العملاء والولاء</span>
+                        </a>
+                    </div>
+                    
+                    <div class="nav-group">
+                        <div class="nav-group-title">الموظفين</div>
+                        <a class="nav-item" onclick="app.showSection('attendance')">
+                            <i class="fas fa-clock"></i>
+                            <span>الحضور والتبس</span>
+                        </a>
+                    </div>
+                    
+                    <div class="nav-group">
+                        <div class="nav-group-title">التقارير</div>
+                        <a class="nav-item" onclick="app.showSection('reports')">
+                            <i class="fas fa-chart-bar"></i>
+                            <span>التقارير</span>
+                        </a>
+                    </div>
+                    
+                    <div class="nav-group">
+                        <div class="nav-group-title">الإعدادات</div>
+                        <a class="nav-item" onclick="app.showSection('settings')">
+                            <i class="fas fa-cog"></i>
+                            <span>الإعدادات</span>
+                        </a>
+                    </div>
+                </nav>
+            </div>
+            
+            <div class="main-content-modern">
+                <!-- Dashboard -->
+                <div id="dashboard" class="section-modern active">
+                    <div class="dashboard-welcome">
+                        <h1>مرحباً بك في لوحة التحكم</h1>
+                        <p>آخر تحديث: <span id="lastUpdate"></span></p>
+                    </div>
+                    
+                    <div class="kpi-grid">
+                        <div class="kpi-card">
+                            <div class="kpi-icon" style="background: linear-gradient(45deg, #667eea, #764ba2);">
+                                <i class="fas fa-dollar-sign"></i>
+                            </div>
+                            <div class="kpi-content">
+                                <h4>مبيعات اليوم</h4>
+                                <div class="kpi-value" id="kpiDailySales">0.00 ج.م</div>
+                            </div>
+                        </div>
+                        
+                        <div class="kpi-card">
+                            <div class="kpi-icon" style="background: linear-gradient(45deg, #f093fb, #f5576c);">
+                                <i class="fas fa-shopping-cart"></i>
+                            </div>
+                            <div class="kpi-content">
+                                <h4>عدد الفواتير</h4>
+                                <div class="kpi-value" id="kpiInvoiceCount">0</div>
+                            </div>
+                        </div>
+                        
+                        <div class="kpi-card">
+                            <div class="kpi-icon" style="background: linear-gradient(45deg, #fa709a, #fee140);">
+                                <i class="fas fa-box"></i>
+                            </div>
+                            <div class="kpi-content">
+                                <h4>منتجات ناقصة</h4>
+                                <div class="kpi-value" id="kpiLowStock">0</div>
+                            </div>
+                        </div>
+                        
+                        <div class="kpi-card">
+                            <div class="kpi-icon" style="background: linear-gradient(45deg, #ffecd2, #fcb69f);">
+                                <i class="fas fa-clock"></i>
+                            </div>
+                            <div class="kpi-content">
+                                <h4>الموظفين الحاضرين</h4>
+                                <div class="kpi-value" id="kpiPresentEmployees">0/0</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="charts-grid">
+                        <div class="chart-card">
+                            <div class="chart-header">
+                                <h3>المبيعات اليومية</h3>
+                            </div>
+                            <canvas id="salesChart" style="max-height: 250px;"></canvas>
+                        </div>
+                        
+                        <div class="chart-card">
+                            <div class="chart-header">
+                                <h3>أفضل المنتجات مبيعاً</h3>
+                            </div>
+                            <canvas id="topProductsChart" style="max-height: 250px;"></canvas>
+                        </div>
+                    </div>
+                    
+                    <div class="activity-card" style="margin-top: 20px;">
+                        <h3><i class="fas fa-history"></i> آخر المبيعات</h3>
+                        <div id="recentSalesList" style="max-height: 200px; overflow-y: auto;"></div>
+                    </div>
+                </div>
+                
+                <!-- الكاشير -->
+                <div id="cashier" class="section-modern">
+                    <div class="cashier-pro-container">
+                        <div class="cashier-products-panel">
+                            <div class="panel-header">
+                                <h3><i class="fas fa-box"></i> المنتجات</h3>
+                                <input type="text" id="productSearch" placeholder="🔍 بحث بالاسم أو الباركود..." style="padding:10px;border-radius:8px;border:1px solid #ddd;width:100%;">
+                            </div>
+                            
+                            <div class="categories-tabs">
+                                <button class="category-tab active" onclick="app.filterProducts('all')">الكل</button>
+                                <div id="categoryTabs"></div>
+                            </div>
+                            
+                            <div class="products-grid" id="productsGrid"></div>
+                        </div>
+                        
+                        <div class="cashier-cart-panel">
+                            <div class="panel-header">
+                                <h3><i class="fas fa-shopping-cart"></i> السلة</h3>
+                                <button onclick="app.clearCart()" class="btn-icon">
+                                    <i class="fas fa-trash"></i>
+                                </button>
+                            </div>
+                            
+                            <div class="customer-info-section">
+                                <div class="input-group-modern">
+                                    <i class="fas fa-user"></i>
+                                    <input type="text" id="customerPhone" placeholder="رقم هاتف العميل (لنقاط الولاء)">
+                                    <button onclick="app.searchCustomer()" class="btn-small">
+                                        <i class="fas fa-search"></i>
+                                    </button>
+                                </div>
+                                <div id="customerDetails" class="customer-details hidden"></div>
+                            </div>
+                            
+                            <div class="cart-items-modern" id="cartItemsPro" style="max-height: 300px; overflow-y: auto;"></div>
+                            
+                            <div class="cart-summary-modern">
+                                <div class="summary-row">
+                                    <span>المجموع:</span>
+                                    <span id="cartSubtotal">0.00 ج.م</span>
+                                </div>
+                                <div class="summary-row">
+                                    <span>الضريبة (14%):</span>
+                                    <span id="cartTax">0.00 ج.م</span>
+                                </div>
+                                <div class="summary-row total">
+                                    <span>الإجمالي:</span>
+                                    <span id="cartTotal">0.00 ج.م</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="cashier-payment-panel">
+                            <div class="panel-header">
+                                <h3><i class="fas fa-credit-card"></i> الدفع</h3>
+                            </div>
+                            
+                            <div class="payment-methods">
+                                <div class="payment-method active" id="cashMethod" onclick="app.setPaymentMethod('cash')">
+                                    <input type="radio" name="paymentMethod" value="cash" checked>
+                                    <i class="fas fa-money-bill"></i> نقدي
+                                </div>
+                                <div class="payment-method" id="cardMethod" onclick="app.setPaymentMethod('card')">
+                                    <input type="radio" name="paymentMethod" value="card">
+                                    <i class="fas fa-credit-card"></i> بطاقة
+                                </div>
+                            </div>
+                            
+                            <div class="payment-details">
+                                <div class="input-group-modern">
+                                    <i class="fas fa-money-bill"></i>
+                                    <input type="number" id="cashAmount" placeholder="المبلغ المدفوع">
+                                </div>
+                                <div id="cardPaymentDetails" style="display:none;">
+                                    <div class="input-group-modern">
+                                        <i class="fas fa-credit-card"></i>
+                                        <input type="text" id="cardNumber" placeholder="رقم البطاقة (أي 4 أرقام)">
+                                    </div>
+                                </div>
+                                <div class="change-display-modern" id="changeAmount">
+                                    الباقي: 0.00 ج.م
+                                </div>
+                            </div>
+                            
+                            <div class="payment-actions">
+                                <button onclick="app.calculateChangePro()" class="btn-info-modern">
+                                    <i class="fas fa-calculator"></i> حساب الباقي
+                                </button>
+                                <button onclick="app.completeSalePro()" class="btn-success-modern">
+                                    <i class="fas fa-check"></i> إنهاء البيع وطباعة فاتورة
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- الجرد والمنتجات -->
+                <div id="inventory" class="section-modern">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 20px;">
+                        <h3><i class="fas fa-boxes"></i> إدارة الجرد والمنتجات</h3>
+                        <button onclick="app.showAddProductForm()" class="btn-primary-modern" style="width: auto; padding: 10px 20px;">
+                            <i class="fas fa-plus"></i> إضافة منتج جديد
+                        </button>
+                    </div>
+                    
+                    <div id="addProductForm" style="display:none; background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+                        <h4>إضافة منتج جديد</h4>
+                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
+                            <input type="text" id="newBarcode" placeholder="الباركود" class="form-control">
+                            <input type="text" id="newName" placeholder="اسم المنتج" class="form-control">
+                            <select id="newCategory" class="form-control"></select>
+                            <input type="number" id="newPrice" placeholder="السعر" class="form-control">
+                            <input type="number" id="newCost" placeholder="التكلفة" class="form-control">
+                            <input type="number" id="newStock" placeholder="الكمية" class="form-control">
+                            <input type="number" id="newMinStock" placeholder="الحد الأدنى" class="form-control">
+                        </div>
+                        <div style="margin-top: 15px;">
+                            <button onclick="app.saveNewProduct()" class="btn-success-modern" style="width: auto; padding: 10px 30px;">حفظ</button>
+                            <button onclick="app.hideAddProductForm()" class="btn-secondary-modern" style="width: auto; padding: 10px 30px;">إلغاء</button>
+                        </div>
+                    </div>
+                    
+                    <div style="background: white; border-radius: 10px; padding: 20px;">
+                        <table style="width: 100%; border-collapse: collapse;">
+                            <thead>
+                                <tr style="background: #667eea; color: white;">
+                                    <th>الباركود</th>
+                                    <th>المنتج</th>
+                                    <th>الفئة</th>
+                                    <th>السعر</th>
+                                    <th>المخزون</th>
+                                    <th>الحالة</th>
+                                    <th>إجراءات</th>
+                                </tr>
+                            </thead>
+                            <tbody id="inventoryTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <!-- مراقبة المخزون -->
+                <div id="stockControl" class="section-modern">
+                    <h3><i class="fas fa-chart-line"></i> مراقبة المخزون</h3>
+                    
+                    <div class="reports-grid">
+                        <div class="report-card">
+                            <i class="fas fa-exclamation-triangle" style="color: #e74c3c;"></i>
+                            <h4>منتجات تحت الحد الأدنى</h4>
+                            <div id="lowStockList"></div>
+                        </div>
+                        <div class="report-card">
+                            <i class="fas fa-chart-bar"></i>
+                            <h4>المنتجات الأكثر مبيعاً</h4>
+                            <div id="topSellingList"></div>
+                        </div>
+                        <div class="report-card">
+                            <i class="fas fa-calendar"></i>
+                            <h4>منتجات قاربت على الانتهاء</h4>
+                            <div id="expiringList"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- العملاء -->
+                <div id="customers" class="section-modern">
+                    <div style="display: flex; justify-content: space-between;">
+                        <h3><i class="fas fa-users"></i> العملاء ونقاط الولاء</h3>
+                        <button onclick="app.showAddCustomerForm()" class="btn-primary-modern" style="width: auto; padding: 10px 20px;">
+                            <i class="fas fa-plus"></i> إضافة عميل
+                        </button>
+                    </div>
+                    
+                    <div id="addCustomerForm" style="display:none; background: white; padding: 20px; border-radius: 10px; margin: 20px 0;">
+                        <h4>إضافة عميل جديد</h4>
+                        <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px;">
+                            <input type="text" id="newCustomerName" placeholder="اسم العميل">
+                            <input type="text" id="newCustomerPhone" placeholder="رقم الهاتف">
+                            <input type="email" id="newCustomerEmail" placeholder="البريد الإلكتروني">
+                        </div>
+                        <button onclick="app.saveNewCustomer()" class="btn-success-modern" style="margin-top: 15px;">حفظ</button>
+                        <button onclick="app.hideAddCustomerForm()" class="btn-secondary-modern">إلغاء</button>
+                    </div>
+                    
+                    <div style="background: white; border-radius: 10px; padding: 20px; margin-top: 20px;">
+                        <table style="width: 100%;">
+                            <thead>
+                                <tr style="background: #667eea; color: white;">
+                                    <th>الاسم</th>
+                                    <th>الهاتف</th>
+                                    <th>النقاط</th>
+                                    <th>المشتريات</th>
+                                    <th>آخر زيارة</th>
+                                </tr>
+                            </thead>
+                            <tbody id="customersTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <!-- الحضور والتبس -->
+                <div id="attendance" class="section-modern">
+                    <div style="display: flex; gap: 20px;">
+                        <div style="flex: 1;">
+                            <h3><i class="fas fa-user-plus"></i> إضافة موظف</h3>
+                            <div style="background: white; padding: 20px; border-radius: 10px;">
+                                <input type="text" id="newEmployeeName" placeholder="اسم الموظف" style="width: 100%; padding: 10px; margin-bottom: 10px;">
+                                <input type="text" id="newEmployeePhone" placeholder="رقم الهاتف" style="width: 100%; padding: 10px; margin-bottom: 10px;">
+                                <select id="newEmployeeRole" style="width: 100%; padding: 10px; margin-bottom: 10px;">
+                                    <option value="كاشير">كاشير</option>
+                                    <option value="مدير">مدير</option>
+                                    <option value="مخزون">مسؤول مخزون</option>
+                                </select>
+                                <input type="number" id="newEmployeeSalary" placeholder="الراتب" style="width: 100%; padding: 10px; margin-bottom: 10px;">
+                                <button onclick="app.addEmployee()" class="btn-primary-modern">إضافة موظف</button>
+                            </div>
+                        </div>
+                        
+                        <div style="flex: 2;">
+                            <h3><i class="fas fa-hand-holding-heart"></i> نظام التبس (البقشيش)</h3>
+                            <div style="background: white; padding: 20px; border-radius: 10px; margin-bottom: 20px;">
+                                <h4>إجمالي التبس اليوم: <span id="totalTipsToday">0.00</span> ج.م</h4>
+                                <button onclick="app.distributeTips()" class="btn-success-modern">توزيع التبس على الموظفين الحاضرين</button>
+                            </div>
+                            
+                            <h3><i class="fas fa-clock"></i> الحضور والانصراف</h3>
+                            <div style="background: white; padding: 20px; border-radius: 10px;">
+                                <select id="employeeSelect" style="width: 100%; padding: 10px; margin-bottom: 10px;"></select>
+                                <div style="display: flex; gap: 10px;">
+                                    <button onclick="app.checkInSelected()" class="btn-success-modern">تسجيل حضور</button>
+                                    <button onclick="app.checkOutSelected()" class="btn-secondary-modern">تسجيل انصراف</button>
+                                </div>
+                            </div>
+                            
+                            <table style="width: 100%; margin-top: 20px; background: white; border-radius: 10px;">
+                                <thead>
+                                    <tr style="background: #667eea; color: white;">
+                                        <th>الموظف</th>
+                                        <th>الدور</th>
+                                        <th>وقت الحضور</th>
+                                        <th>وقت الانصراف</th>
+                                        <th>التبس المستحق</th>
+                                        <th>الحالة</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="attendanceTableBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- التقارير -->
+                <div id="reports" class="section-modern">
+                    <h3><i class="fas fa-chart-bar"></i> التقارير</h3>
+                    <div class="reports-grid">
+                        <div class="report-card">
+                            <i class="fas fa-calendar-day"></i>
+                            <h4>تقرير المبيعات اليومي</h4>
+                            <button onclick="app.generateDailyReport()" class="btn-primary-modern">عرض</button>
+                        </div>
+                        <div class="report-card">
+                            <i class="fas fa-calendar-week"></i>
+                            <h4>تقرير المبيعات الأسبوعي</h4>
+                            <button onclick="app.generateWeeklyReport()" class="btn-primary-modern">عرض</button>
+                        </div>
+                        <div class="report-card">
+                            <i class="fas fa-box"></i>
+                            <h4>تقرير المخزون</h4>
+                            <button onclick="app.generateInventoryReport()" class="btn-primary-modern">عرض</button>
+                        </div>
+                        <div class="report-card">
+                            <i class="fas fa-users"></i>
+                            <h4>تقرير العملاء</h4>
+                            <button onclick="app.generateCustomersReport()" class="btn-primary-modern">عرض</button>
+                        </div>
+                    </div>
+                    <div id="reportResult" style="margin-top: 20px; background: white; border-radius: 10px; padding: 20px;"></div>
+                </div>
+                
+                <!-- الإعدادات -->
+                <div id="settings" class="section-modern">
+                    <h3><i class="fas fa-cog"></i> الإعدادات</h3>
+                    
+                    <div class="setting-card">
+                        <h4>إعدادات المتجر</h4>
+                        <div class="setting-item">
+                            <label>اسم المتجر:</label>
+                            <input type="text" id="storeName" value="سوبر ماركت برو">
+                        </div>
+                        <div class="setting-item">
+                            <label>رقم الهاتف:</label>
+                            <input type="text" id="storePhone" value="01234567890">
+                        </div>
+                        <div class="setting-item">
+                            <label>نسبة الضريبة (%):</label>
+                            <input type="number" id="taxRate" value="14">
+                        </div>
+                        <button onclick="app.saveSettings()" class="btn-primary-modern">حفظ</button>
+                    </div>
+                    
+                    <div class="setting-card">
+                        <h4>نسخ احتياطي</h4>
+                        <button onclick="app.backupData()" class="btn-success-modern">تصدير البيانات</button>
+                        <input type="file" id="importFile" accept=".json" style="display:none;" onchange="app.importData(event)">
+                        <button onclick="document.getElementById('importFile').click()" class="btn-secondary-modern">استيراد بيانات</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- نافذة الفاتورة -->
+    <div id="receiptModal" class="modal-modern hidden">
+        <div class="modal-content-modern">
+            <div class="modal-header-modern">
+                <h2><i class="fas fa-receipt"></i> فاتورة</h2>
+                <div class="modal-actions">
+                    <button onclick="receipt.print()"><i class="fas fa-print"></i> طباعة</button>
+                    <button onclick="app.closeReceipt()"><i class="fas fa-times"></i></button>
+                </div>
+            </div>
+            <div class="modal-body-modern" id="receiptContent"></div>
+        </div>
+    </div>
+
+    <!-- Banner تثبيت التطبيق -->
+    <div id="installBanner" class="install-banner hidden">
+        <span><i class="fas fa-download"></i> تثبيت التطبيق على جهازك</span>
+        <button class="install-btn" onclick="app.installPWA()">تثبيت الآن</button>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="database.js"></script>
+    <script src="receipt.js"></script>
+    <script src="app.js"></script>
+    
+    <script>
+        // تسجيل Service Worker
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('/service-worker.js')
+                .then(() => console.log('✅ Service Worker Registered'))
+                .catch(err => console.log('Service Worker failed:', err));
+        }
+        
+        window.addEventListener('load', function() {
+            document.body.classList.add('loaded');
+        });
+    </script>
+</body>
+</html>
