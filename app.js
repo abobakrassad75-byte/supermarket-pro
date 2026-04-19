@@ -1,177 +1,143 @@
 const app = {
-    cart: [], currentCustomer: null, currentPaymentMethod: 'cash', charts: {}, deferredPrompt: null,
+    cart: [], currentCustomer: null, currentPaymentMethod: 'cash', charts: {}, deferredPrompt: null, currentInvoiceForModal: null,
+    
     init() {
+        window.app = this;
         this.loadSettings(); this.initUI(); this.loadCartFromStorage();
+        this.updateConnectionStatus(navigator.onLine);
+        
         if ('serviceWorker' in navigator) navigator.serviceWorker.register('/service-worker.js');
         window.addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); this.deferredPrompt = e; document.getElementById('installBanner').classList.remove('hidden'); });
         setTimeout(() => { this.loadProducts(); this.loadCategories(); this.loadBranches(); if (document.getElementById('dashboard').classList.contains('active')) this.updateDashboard(); if (DB.checkAndResetDaily()) document.getElementById('newDayAlert').style.display = 'block'; }, 100);
         this.scheduleMidnightReset();
     },
+    
     scheduleMidnightReset() { const now = new Date(), midnight = new Date(); midnight.setHours(24,0,0,0); setTimeout(() => { DB.checkAndResetDaily(); this.updateDashboard(); document.getElementById('newDayAlert').style.display = 'block'; this.scheduleMidnightReset(); }, midnight - now); },
     closeNewDayAlert() { document.getElementById('newDayAlert').style.display = 'none'; },
     installPWA() { if (this.deferredPrompt) { this.deferredPrompt.prompt(); this.deferredPrompt = null; document.getElementById('installBanner').classList.add('hidden'); } },
     loadSettings() { document.getElementById('lastUpdate').textContent = new Date().toLocaleString('ar-EG'); },
     initUI() { document.getElementById('storeName').value = DB.data.settings.companyName; document.getElementById('storePhone').value = DB.data.settings.storePhone; document.getElementById('taxRate').value = DB.data.settings.taxRate; },
+    
+    updateConnectionStatus(isOnline) {
+        const el = document.getElementById('connectionStatus');
+        if (el) {
+            el.className = `connection-status ${isOnline ? 'online' : 'offline'}`;
+            el.innerHTML = isOnline ? '<i class="fas fa-wifi"></i><span>متصل - Live</span>' : '<i class="fas fa-wifi-slash"></i><span>غير متصل</span>';
+        }
+    },
+    
+    onDataUpdated() {
+        console.log('🔄 تحديث البيانات من السحابة');
+        if (document.getElementById('dashboard').classList.contains('active')) this.updateDashboard();
+        if (document.getElementById('cashier').classList.contains('active')) this.loadProducts();
+        if (document.getElementById('attendance').classList.contains('active')) this.loadAttendance();
+    },
+    
+    onNewSale(sale) {
+        console.log('💰 عملية بيع جديدة:', sale.total);
+        this.showToast(`🔔 فاتورة #${sale.invoiceNumber} - ${sale.total?.toFixed(2)} ج.م - ${sale.userName}`, 'success');
+        if (document.getElementById('dashboard').classList.contains('active')) { this.updateDashboard(); this.loadRecentSales(); }
+        this.playNotificationSound();
+    },
+    
+    playNotificationSound() {
+        try { const audio = new Audio('data:audio/wav;base64,UklGRlwAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YVoAAACAgICAf39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/f39/fw=='); audio.play().catch(() => {}); } catch (e) {}
+    },
+    
     updateDashboard() { const s = DB.getDashboardStats(); document.getElementById('kpiDailySales').textContent = `${s.dailySales.toFixed(2)} ج.م`; document.getElementById('kpiInvoiceCount').textContent = s.invoiceCount; document.getElementById('kpiLowStock').textContent = s.lowStock; document.getElementById('kpiPresentEmployees').textContent = `${s.presentEmployees}/${s.totalEmployees}`; this.renderSalesChart(); this.loadRecentSales(); },
     renderSalesChart() { const ctx = document.getElementById('salesChart')?.getContext('2d'); if (!ctx) return; if (this.charts.sales) this.charts.sales.destroy(); this.charts.sales = new Chart(ctx, { type: 'line', data: { labels: ['اليوم'], datasets: [{ label: 'المبيعات', data: [DB.getTodaySales().reduce((s, sale) => s + sale.total, 0)], borderColor: '#667eea', backgroundColor: 'rgba(102,126,234,0.1)', fill: true }] }, options: { responsive: true } }); },
-    loadRecentSales() { const c = document.getElementById('recentSalesList'); if (!c) return; const sales = DB.data.sales.slice(0,5); c.innerHTML = sales.map(s => `<div><strong>#${s.id.slice(-6)}</strong> - ${s.total.toFixed(2)} ج.م</div>`).join('') || '<div>لا توجد مبيعات</div>'; },
-    showSalesDetails() { const sales = DB.getTodaySales(); let h = `<h4>فواتير اليوم</h4><table>`; sales.forEach(s => { const u = DB.data.users.find(u => u.id === s.userId); h += `<tr><td>${new Date(s.date).toLocaleTimeString('ar-EG')}</td><td>${s.total.toFixed(2)}</td><td>${u?.name || '-'}</td></tr>`; }); h += `</table><p><strong>الإجمالي: ${sales.reduce((sum, s) => sum + s.total, 0).toFixed(2)} ج.م</strong></p>`; this.showDetailModal('تفاصيل المبيعات', h); },
-    showInvoicesDetails() { const sales = DB.getTodaySales(); let h = `<h4>فواتير اليوم (${sales.length})</h4>`; if (sales.length) { h += `<table><tr><th>الفاتورة</th><th>الوقت</th><th>الإجمالي</th></tr>`; sales.forEach(s => h += `<tr><td>#${s.id.slice(-6)}</td><td>${new Date(s.date).toLocaleTimeString('ar-EG')}</td><td>${s.total.toFixed(2)}</td></tr>`); h += `</table>`; } else h += `<p>لا توجد فواتير</p>`; this.showDetailModal('الفواتير', h); },
+    
+    loadRecentSales() {
+        const container = document.getElementById('recentSalesList');
+        if (!container) return;
+        const sales = DB.data.sales.slice(0, 10);
+        if (!sales.length) { container.innerHTML = '<div style="padding:20px;text-align:center;color:#999;">لا توجد مبيعات اليوم</div>'; return; }
+        let html = '<table style="width:100%;"><tr style="background:#f5f5f5;"><th>رقم الفاتورة</th><th>الوقت</th><th>الإجمالي</th><th>الكاشير</th><th>تفاصيل</th></tr>';
+        sales.forEach(sale => { html += `<tr><td><strong>#${sale.invoiceNumber || sale.id.slice(-8)}</strong></td><td>${new Date(sale.date).toLocaleTimeString('ar-EG')}</td><td>${sale.total?.toFixed(2) || '0.00'} ج.م</td><td>${sale.userName || '-'}</td><td><button onclick="app.showInvoiceDetail('${sale.id}')" style="background:#667eea;color:white;border:none;padding:5px 10px;border-radius:5px;cursor:pointer;"><i class="fas fa-eye"></i> عرض</button></td></tr>`; });
+        html += '</table>'; container.innerHTML = html;
+    },
+    
+    showInvoiceDetail(saleId) {
+        const sale = DB.getSaleById(saleId);
+        if (!sale) { this.showToast('الفاتورة غير موجودة', 'error'); return; }
+        this.currentInvoiceForModal = sale;
+        document.getElementById('invoiceDetailTitle').textContent = `🧾 فاتورة #${sale.invoiceNumber || sale.id.slice(-8)}`;
+        let itemsHtml = '', subtotal = 0;
+        if (sale.items?.length) { itemsHtml = '<h4 style="margin-bottom:10px;">📦 المنتجات:</h4>'; sale.items.forEach(item => { const itemTotal = item.price * item.quantity; subtotal += itemTotal; itemsHtml += `<div class="invoice-detail-row"><span><strong>${item.name}</strong> × ${item.quantity}</span><span>${itemTotal.toFixed(2)} ج.م</span></div>`; }); }
+        const tax = sale.tax || (subtotal * (DB.data.settings.taxRate / 100)), total = sale.total || (subtotal + tax);
+        document.getElementById('invoiceDetailBody').innerHTML = `<div class="invoice-detail-header"><div class="invoice-detail-row"><span>📅 التاريخ:</span><span>${new Date(sale.date).toLocaleString('ar-EG')}</span></div><div class="invoice-detail-row"><span>👤 الكاشير:</span><span>${sale.userName || '-'}</span></div><div class="invoice-detail-row"><span>💳 طريقة الدفع:</span><span>${sale.paymentMethod === 'cash' ? '💵 نقدي' : '💳 بطاقة'}</span></div></div>${itemsHtml}<div style="margin-top:20px;padding:15px;background:#f5f5f5;border-radius:8px;"><div class="invoice-detail-row"><span>المجموع الفرعي:</span><span>${subtotal.toFixed(2)} ج.م</span></div><div class="invoice-detail-row"><span>الضريبة (${DB.data.settings.taxRate}%):</span><span>${tax.toFixed(2)} ج.م</span></div><div class="invoice-detail-row" style="font-weight:bold;font-size:1.2em;"><span>الإجمالي النهائي:</span><span>${total.toFixed(2)} ج.م</span></div><div class="invoice-detail-row"><span>المدفوع:</span><span>${(sale.paid || total).toFixed(2)} ج.م</span></div><div class="invoice-detail-row" style="color:#27ae60;"><span>الباقي:</span><span>${(sale.change || 0).toFixed(2)} ج.م</span></div></div>`;
+        document.getElementById('invoiceDetailModal').classList.remove('hidden');
+    },
+    closeInvoiceDetailModal() { document.getElementById('invoiceDetailModal').classList.add('hidden'); this.currentInvoiceForModal = null; },
+    printInvoiceFromModal() { if (this.currentInvoiceForModal) { receipt.show(this.currentInvoiceForModal); setTimeout(() => receipt.print(), 100); } },
+    
+    showToast(message, type = 'error') { const toast = document.getElementById('toast'), msg = document.getElementById('toastMessage'), icon = toast.querySelector('i'); toast.style.background = type === 'error' ? '#e74c3c' : '#27ae60'; icon.className = type === 'error' ? 'fas fa-exclamation-circle' : 'fas fa-check-circle'; toast.style.display = 'flex'; msg.textContent = message; setTimeout(() => toast.style.display = 'none', 3000); },
+    showSalesDetails() { const sales = DB.getTodaySales(); let h = `<h4>فواتير اليوم</h4><table>`; sales.forEach(s => h += `<tr><td>${new Date(s.date).toLocaleTimeString('ar-EG')}</td><td>${s.total.toFixed(2)}</td><td>${s.userName || '-'}</td></tr>`); h += `</table><p><strong>الإجمالي: ${sales.reduce((sum, s) => sum + s.total, 0).toFixed(2)} ج.م</strong></p>`; this.showDetailModal('تفاصيل المبيعات', h); },
+    showInvoicesDetails() { const sales = DB.getTodaySales(); let h = `<h4>فواتير اليوم (${sales.length})</h4>`; if (sales.length) { h += `<table><tr><th>الفاتورة</th><th>الوقت</th><th>الإجمالي</th></tr>`; sales.forEach(s => h += `<tr><td>#${s.invoiceNumber || s.id.slice(-8)}</td><td>${new Date(s.date).toLocaleTimeString('ar-EG')}</td><td>${s.total.toFixed(2)}</td></tr>`); h += `</table>`; } else h += `<p>لا توجد فواتير</p>`; this.showDetailModal('الفواتير', h); },
     showLowStockDetails() { const low = DB.getLowStockProducts(); let h = `<h4>المنتجات الناقصة</h4>`; if (low.length) { h += `<ul>`; low.forEach(p => h += `<li>${p.name} - ${p.stock} (الحد: ${p.minStock})</li>`); h += `</ul>`; } else h += `<p style="color:green;">✅ جميع المنتجات متوفرة</p>`; this.showDetailModal('المنتجات الناقصة', h); },
-    showAttendanceDetails() { const present = DB.getPresentEmployees(); const late = DB.getLateEmployees(); const absent = DB.getAbsentEmployees(); let h = `<h4>الحاضرين (${present.length})</h4>`; present.forEach(p => h += `<p>✅ ${p.name} - ${new Date(p.checkIn).toLocaleTimeString('ar-EG')}</p>`); h += `<h4>المتأخرين (${late.length})</h4>`; late.forEach(l => h += `<p>⚠️ ${l.name} - متأخر ${l.lateMinutes} دقيقة</p>`); h += `<h4>الغائبين (${absent.length})</h4>`; absent.forEach(a => h += `<p>❌ ${a}</p>`); this.showDetailModal('تفاصيل الحضور', h); },
+    showAttendanceDetails() { const present = DB.getPresentEmployees(), late = DB.getLateEmployees(), absent = DB.getAbsentEmployees(); let h = `<h4>الحاضرين (${present.length})</h4>`; present.forEach(p => h += `<p>✅ ${p.name} - ${new Date(p.checkIn).toLocaleTimeString('ar-EG')}</p>`); h += `<h4>المتأخرين (${late.length})</h4>`; late.forEach(l => h += `<p>⚠️ ${l.name} - متأخر ${l.lateMinutes} دقيقة</p>`); h += `<h4>الغائبين (${absent.length})</h4>`; absent.forEach(a => h += `<p>❌ ${a}</p>`); this.showDetailModal('تفاصيل الحضور', h); },
     showDetailModal(t, b) { document.getElementById('detailTitle').textContent = t; document.getElementById('detailBody').innerHTML = b; document.getElementById('detailModal').classList.remove('hidden'); },
     closeDetailModal() { document.getElementById('detailModal').classList.add('hidden'); },
     
-    // Toast Notification
-    showToast(message, type = 'error') {
-        const toast = document.getElementById('toast');
-        const msg = document.getElementById('toastMessage');
-        const icon = toast.querySelector('i');
-        
-        toast.style.background = type === 'error' ? '#e74c3c' : '#27ae60';
-        icon.className = type === 'error' ? 'fas fa-exclamation-circle' : 'fas fa-check-circle';
-        toast.style.display = 'flex';
-        msg.textContent = message;
-        
-        setTimeout(() => { toast.style.display = 'none'; }, 3000);
-    },
+    // ========== مراقبة المخزون ==========
+    loadStockControl() { this.updateLowStockCount(); this.updateTopSellingPreview(); this.updateReorderPreview(); this.updateInventoryValuePreview(); this.updateStockMovementPreview(); this.updateProfitablePreview(); this.loadStockTable(); this.loadStockCategoryFilter(); },
+    updateLowStockCount() { document.getElementById('lowStockCount').textContent = DB.getLowStockProducts().length; },
+    updateTopSellingPreview() { const top = this.getTopSellingProducts(3); const c = document.getElementById('topSellingPreview'); if (!top.length) { c.innerHTML = '<p style="color:#999;">لا توجد مبيعات</p>'; return; } c.innerHTML = top.map((p, i) => `<div style="display:flex;justify-content:space-between;"><span>${i+1}. ${p.name}</span><span><strong>${p.quantity}</strong> قطعة</span></div>`).join(''); },
+    updateReorderPreview() { const products = DB.getProducts().filter(p => p.stock <= p.minStock * 1.5); document.getElementById('reorderPreview').innerHTML = products.length ? `<p><strong>${products.length}</strong> منتجات</p>` : '<p style="color:#27ae60;">✅ ممتاز</p>'; },
+    updateInventoryValuePreview() { const total = DB.getProducts().reduce((s, p) => s + (p.stock * p.cost), 0); document.getElementById('inventoryValuePreview').textContent = `${total.toFixed(2)} ج.م`; },
+    updateStockMovementPreview() { const total = DB.getTodaySales().reduce((s, sale) => { if (sale.items) sale.items.forEach(i => s += i.quantity || 0); return s; }, 0); document.getElementById('stockMovementPreview').innerHTML = `<p>📤 <strong>${total}</strong> قطعة اليوم</p>`; },
+    updateProfitablePreview() { const profitable = this.getMostProfitableProducts(3); const c = document.getElementById('profitablePreview'); if (!profitable.length) { c.innerHTML = '<p style="color:#999;">لا توجد بيانات</p>'; return; } c.innerHTML = profitable.map((p, i) => `<div style="display:flex;justify-content:space-between;"><span>${i+1}. ${p.name}</span><span><strong>${p.profit.toFixed(2)}</strong> ج.م</span></div>`).join(''); },
     
+    loadStockTable() { const tbody = document.getElementById('stockTableBody'); if (!tbody) return; const products = DB.getProducts(), categories = DB.data.categories; tbody.innerHTML = products.map(p => { const cat = categories.find(c => c.id === p.categoryId)?.name || '-'; const profit = p.price - p.cost, profitMargin = ((profit / p.cost) * 100).toFixed(1), stockValue = p.stock * p.cost; const status = p.stock === 0 ? '🔴 نفذ' : p.stock <= p.minStock ? '🟡 منخفض' : p.stock <= p.minStock * 2 ? '🟠 متوسط' : '🟢 جيد'; return `<tr><td>${p.barcode}</td><td><strong>${p.name}</strong></td><td>${cat}</td><td style="color:${p.stock <= p.minStock ? '#e74c3c' : '#2c3e50'};">${p.stock}</td><td>${p.minStock}</td><td>${p.cost.toFixed(2)}</td><td>${p.price.toFixed(2)}</td><td style="color:#27ae60;">${profit.toFixed(2)} (${profitMargin}%)</td><td>${stockValue.toFixed(2)}</td><td>${status}</td></tr>`; }).join(''); },
+    filterStockTable() { const search = document.getElementById('stockSearchInput')?.value.toLowerCase() || ''; const catFilter = document.getElementById('stockCategoryFilter')?.value || 'all'; let products = DB.getProducts(); if (catFilter !== 'all') products = products.filter(p => p.categoryId === catFilter); if (search) products = products.filter(p => p.name.toLowerCase().includes(search) || p.barcode.includes(search)); const tbody = document.getElementById('stockTableBody'), categories = DB.data.categories; tbody.innerHTML = products.map(p => { const cat = categories.find(c => c.id === p.categoryId)?.name || '-'; const profit = p.price - p.cost, profitMargin = ((profit / p.cost) * 100).toFixed(1), stockValue = p.stock * p.cost; const status = p.stock === 0 ? '🔴 نفذ' : p.stock <= p.minStock ? '🟡 منخفض' : p.stock <= p.minStock * 2 ? '🟠 متوسط' : '🟢 جيد'; return `<tr><td>${p.barcode}</td><td><strong>${p.name}</strong></td><td>${cat}</td><td style="color:${p.stock <= p.minStock ? '#e74c3c' : '#2c3e50'};">${p.stock}</td><td>${p.minStock}</td><td>${p.cost.toFixed(2)}</td><td>${p.price.toFixed(2)}</td><td style="color:#27ae60;">${profit.toFixed(2)} (${profitMargin}%)</td><td>${stockValue.toFixed(2)}</td><td>${status}</td></tr>`; }).join(''); },
+    loadStockCategoryFilter() { const s = document.getElementById('stockCategoryFilter'); if (s) s.innerHTML = '<option value="all">كل الفئات</option>' + DB.data.categories.map(c => `<option value="${c.id}">${c.name}</option>`).join(''); },
+    
+    showTopSellingDetails() { const top = this.getTopSellingProducts(10); let h = `<h4>🏆 المنتجات الأكثر مبيعاً</h4>`; if (!top.length) h += '<p>لا توجد مبيعات</p>'; else { h += '<table><tr><th>#</th><th>المنتج</th><th>الكمية</th><th>الإيرادات</th></tr>'; top.forEach((p, i) => h += `<tr><td>${i+1}</td><td>${p.name}</td><td>${p.quantity}</td><td>${(p.revenue||0).toFixed(2)} ج.م</td></tr>`); h += '</table>'; } this.showDetailModal('الأكثر مبيعاً', h); },
+    showExpiringProducts() { const products = DB.getProducts().filter(p => p.stock <= p.minStock * 1.5); let h = `<h4>📦 منتجات تحتاج إعادة طلب</h4>`; if (!products.length) h += '<p style="color:#27ae60;">✅ المخزون ممتاز</p>'; else { h += '<table><tr><th>المنتج</th><th>المخزون</th><th>الحد</th><th>المطلوب</th></tr>'; products.forEach(p => { const needed = (p.minStock * 2) - p.stock; h += `<tr><td>${p.name}</td><td style="color:${p.stock <= p.minStock ? '#e74c3c' : '#f39c12'};">${p.stock}</td><td>${p.minStock}</td><td>${needed > 0 ? needed : 0}</td></tr>`; }); h += '</table>'; } this.showDetailModal('تحتاج إعادة طلب', h); },
+    showInventoryValueDetails() { const products = DB.getProducts(); const cost = products.reduce((s, p) => s + p.stock * p.cost, 0), retail = products.reduce((s, p) => s + p.stock * p.price, 0); let h = `<h4>💰 قيمة المخزون</h4><div style="background:#f5f5f5;padding:15px;"><div>قيمة التكلفة: <strong>${cost.toFixed(2)} ج.م</strong></div><div>قيمة البيع: <strong>${retail.toFixed(2)} ج.م</strong></div><div style="color:#27ae60;">الربح المتوقع: <strong>${(retail-cost).toFixed(2)} ج.م</strong></div></div>`; this.showDetailModal('قيمة المخزون', h); },
+    showStockMovement() { const weekSales = DB.getWeekSales(); const movement = {}; weekSales.forEach(s => { if (s.items) s.items.forEach(i => { if (!movement[i.id]) { const p = DB.data.products.find(p => p.id === i.id); movement[i.id] = { name: p?.name || i.name, sold: 0, stock: p?.stock || 0 }; } movement[i.id].sold += i.quantity || 0; }); }); let h = `<h4>📊 حركة المخزون (7 أيام)</h4>`; const list = Object.values(movement).sort((a,b) => b.sold - a.sold); if (!list.length) h += '<p>لا توجد حركة</p>'; else { h += '<table><tr><th>المنتج</th><th>المباع</th><th>المخزون</th><th>الدوران</th></tr>'; list.forEach(m => h += `<tr><td>${m.name}</td><td>${m.sold}</td><td>${m.stock}</td><td>${m.stock ? (m.sold/m.stock*100).toFixed(1) : '∞'}%</td></tr>`); h += '</table>'; } this.showDetailModal('حركة المخزون', h); },
+    showMostProfitableProducts() { const profitable = this.getMostProfitableProducts(10); let h = `<h4>💰 الأكثر ربحية</h4>`; if (!profitable.length) h += '<p>لا توجد بيانات</p>'; else { h += '<table><tr><th>#</th><th>المنتج</th><th>التكلفة</th><th>السعر</th><th>الربح</th><th>النسبة</th></tr>'; profitable.forEach((p, i) => h += `<tr><td>${i+1}</td><td>${p.name}</td><td>${p.cost.toFixed(2)}</td><td>${p.price.toFixed(2)}</td><td style="color:#27ae60;">${p.profit.toFixed(2)}</td><td>${p.profitMargin}%</td></tr>`); h += '</table>'; } this.showDetailModal('الأكثر ربحية', h); },
+    
+    getTopSellingProducts(limit = 5) { const sales = {}; DB.data.sales.forEach(s => { if (s.items) s.items.forEach(i => { if (!sales[i.id]) sales[i.id] = { quantity: 0, revenue: 0 }; sales[i.id].quantity += i.quantity || 0; sales[i.id].revenue += (i.price * i.quantity) || 0; }); }); return Object.entries(sales).map(([id, d]) => ({ id, name: DB.data.products.find(p => p.id === id)?.name || 'منتج محذوف', ...d })).sort((a,b) => b.quantity - a.quantity).slice(0, limit); },
+    getMostProfitableProducts(limit = 5) { return DB.getProducts().map(p => ({ ...p, profit: p.price - p.cost, profitMargin: ((p.price - p.cost) / p.cost * 100).toFixed(1) })).sort((a,b) => b.profit - a.profit).slice(0, limit); },
+    
+    // ========== التقارير ==========
+    generateDetailedDailyReport() { const sales = DB.getTodaySales(); const total = sales.reduce((s, sale) => s + (sale.total || 0), 0); let h = `<div style="background:white;padding:20px;"><h3>📊 تقرير المبيعات اليومي</h3><p>📅 ${new Date().toLocaleDateString('ar-EG')}</p><hr><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:15px;"><div style="background:#f5f5f5;padding:15px;text-align:center;"><h4>📝 الفواتير</h4><div style="font-size:32px;color:#667eea;">${sales.length}</div></div><div style="background:#f5f5f5;padding:15px;text-align:center;"><h4>💰 الإجمالي</h4><div style="font-size:32px;color:#27ae60;">${total.toFixed(2)} ج.م</div></div><div style="background:#f5f5f5;padding:15px;text-align:center;"><h4>📊 المتوسط</h4><div style="font-size:32px;color:#f39c12;">${sales.length ? (total/sales.length).toFixed(2) : '0.00'} ج.م</div></div></div><h4>تفاصيل الفواتير:</h4><table><tr style="background:#667eea;color:white;"><th>الفاتورة</th><th>الوقت</th><th>المنتجات</th><th>الإجمالي</th><th>الدفع</th><th>الكاشير</th></tr>`; sales.forEach(s => h += `<tr><td>#${s.invoiceNumber || s.id.slice(-8)}</td><td>${new Date(s.date).toLocaleTimeString('ar-EG')}</td><td>${s.items?.length || 0}</td><td>${s.total?.toFixed(2)}</td><td>${s.paymentMethod === 'cash' ? '💵 نقدي' : '💳 بطاقة'}</td><td>${s.userName || '-'}</td></tr>`); h += '</table></div>'; document.getElementById('reportResult').innerHTML = h; },
+    generateWeeklyReport() { const sales = DB.getWeekSales(); const total = sales.reduce((s, sale) => s + (sale.total || 0), 0); let h = `<h4>📊 تقرير الأسبوع</h4><p>فواتير: ${sales.length}</p><p>إجمالي: ${total.toFixed(2)} ج.م</p>`; document.getElementById('reportResult').innerHTML = h; },
+    generateDetailedInventoryReport() { const products = DB.getProducts(), low = DB.getLowStockProducts(); const cost = products.reduce((s, p) => s + p.stock * p.cost, 0), retail = products.reduce((s, p) => s + p.stock * p.price, 0); let h = `<div style="background:white;padding:20px;"><h3>📦 تقرير المخزون</h3><div style="display:grid;grid-template-columns:repeat(4,1fr);gap:15px;"><div style="background:#f5f5f5;padding:15px;text-align:center;"><h4>📦 المنتجات</h4><div style="font-size:28px;">${products.length}</div></div><div style="background:#fff3e0;padding:15px;text-align:center;"><h4>⚠️ ناقصة</h4><div style="font-size:28px;color:#e74c3c;">${low.length}</div></div><div style="background:#e8f5e9;padding:15px;text-align:center;"><h4>💰 التكلفة</h4><div>${cost.toFixed(2)} ج.م</div></div><div style="background:#e3f2fd;padding:15px;text-align:center;"><h4>💵 البيع</h4><div>${retail.toFixed(2)} ج.م</div></div></div>`; if (low.length) { h += '<h4>المنتجات الناقصة:</h4><ul>'; low.forEach(p => h += `<li style="color:#e74c3c;">⚠️ ${p.name} - ${p.stock} (الحد: ${p.minStock})</li>`); h += '</ul>'; } h += '</div>'; document.getElementById('reportResult').innerHTML = h; },
+    generateDetailedCustomersReport() { const customers = DB.data.customers.filter(c => c.branchId === DB.data.settings.currentBranch); let h = `<h4>👥 تقرير العملاء (${customers.length})</h4><table><tr style="background:#667eea;color:white;"><th>الاسم</th><th>الهاتف</th><th>النقاط</th><th>المشتريات</th><th>آخر زيارة</th></tr>`; customers.sort((a,b) => (b.totalPurchases||0) - (a.totalPurchases||0)).forEach(c => h += `<tr><td>${c.name}</td><td>${c.phone}</td><td>${c.points||0}</td><td>${(c.totalPurchases||0).toFixed(2)} ج.م</td><td>${c.lastVisit ? new Date(c.lastVisit).toLocaleDateString('ar-EG') : '-'}</td></tr>`); h += '</table>'; document.getElementById('reportResult').innerHTML = h; },
+    exportReportAsPDF() { const content = document.getElementById('reportResult').innerHTML; const w = window.open('', '_blank'); w.document.write(`<html dir="rtl"><head><title>تقرير</title><link href="https://fonts.googleapis.com/css2?family=Cairo&display=swap" rel="stylesheet"><style>body{font-family:Cairo;padding:20px;} table{width:100%;border-collapse:collapse;} th,td{padding:10px;border:1px solid #ddd;}</style></head><body>${content}</body></html>`); w.document.close(); setTimeout(() => w.print(), 200); },
+    exportReportAsExcel() { let csv = ''; document.querySelectorAll('#reportResult table').forEach(t => { t.querySelectorAll('tr').forEach(r => { csv += Array.from(r.querySelectorAll('th, td')).map(c => `"${c.textContent.trim()}"`).join(',') + '\n'; }); csv += '\n'; }); const blob = new Blob(['\ufeff' + csv], { type: 'text/csv' }); const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `report_${new Date().toISOString().slice(0,10)}.csv`; a.click(); },
+    
+    // ========== دوال موجودة مسبقاً ==========
     togglePassword(id) { const i = document.getElementById(id); i.type = i.type === 'password' ? 'text' : 'password'; },
     showForgotPasswordForm() { document.getElementById('loginForm').style.display = 'none'; document.getElementById('forgotForm').style.display = 'block'; },
     showLoginForm() { document.getElementById('loginForm').style.display = 'block'; document.getElementById('forgotForm').style.display = 'none'; document.getElementById('registerForm').style.display = 'none'; },
     showRegisterForm() { document.getElementById('loginForm').style.display = 'none'; document.getElementById('registerForm').style.display = 'block'; },
     requestResetCode() { this.showToast('كود التحقق: 123456', 'success'); document.getElementById('step1').style.display = 'none'; document.getElementById('step2').style.display = 'block'; },
     confirmResetPassword() { this.showToast('تم تغيير كلمة المرور', 'success'); this.showLoginForm(); },
-    register() {
-        const name = document.getElementById('regName').value, username = document.getElementById('regUsername').value, password = document.getElementById('regPassword').value, phone = document.getElementById('regPhone').value, email = document.getElementById('regEmail').value;
-        if (!name || !username || !password) { this.showToast('جميع الحقول مطلوبة', 'error'); return; }
-        if (password.length < 4) { this.showToast('كلمة المرور 4 أحرف على الأقل', 'error'); return; }
-        const r = DB.requestRegistration({ name, username, password, phone, email, role: 'cashier' });
-        if (r.success) { this.showToast(r.message, 'success'); this.showLoginForm(); } else { this.showToast(r.message, 'error'); }
-    },
-    login() {
-        const username = document.getElementById('username').value, password = document.getElementById('password').value;
-        if (!username || !password) { this.showToast('أدخل اسم المستخدم وكلمة المرور', 'error'); return; }
-        const result = DB.authenticateUser(username, password);
-        if (!result) { this.showToast('خطأ في اسم المستخدم أو كلمة المرور', 'error'); return; }
-        if (result.error === 'pending') { this.showToast('الحساب قيد المراجعة', 'error'); return; }
-        if (result.error === 'must_change_password') { this.showForcePasswordChange(result.user); return; }
-        if (result.success) {
-            DB.data.currentUser = result.user;
-            document.getElementById('loginScreen').classList.add('hidden');
-            document.getElementById('mainDashboard').classList.remove('hidden');
-            document.getElementById('userNameDisplay').textContent = result.user.name;
-            this.renderSidebar(); this.updateDashboard(); this.loadProducts(); this.loadBranches();
-            if (DB.isDeveloper(result.user)) setTimeout(() => this.showToast('👨‍💻 مرحباً بك يا مطور النظام!', 'success'), 500);
-        }
-    },
-    showForcePasswordChange(user) {
-        const newPass = prompt('⚠️ يجب تغيير كلمة المرور الافتراضية.\nأدخل كلمة مرور جديدة (6 أحرف على الأقل):');
-        if (!newPass || newPass.length < 6) { alert('كلمة المرور قصيرة'); this.showForcePasswordChange(user); return; }
-        const confirm = prompt('أعد كتابة كلمة المرور:');
-        if (newPass !== confirm) { alert('غير متطابقة'); this.showForcePasswordChange(user); return; }
-        if (DB.forceAdminPasswordChange(newPass)) {
-            this.showToast('تم تغيير كلمة المرور بنجاح', 'success');
-            const r = DB.authenticateUser(user.username, newPass);
-            if (r.success) { DB.data.currentUser = r.user; document.getElementById('loginScreen').classList.add('hidden'); document.getElementById('mainDashboard').classList.remove('hidden'); this.renderSidebar(); this.updateDashboard(); }
-        }
-    },
+    register() { const name = document.getElementById('regName').value, username = document.getElementById('regUsername').value, password = document.getElementById('regPassword').value, phone = document.getElementById('regPhone').value, email = document.getElementById('regEmail').value; if (!name || !username || !password) { this.showToast('جميع الحقول مطلوبة', 'error'); return; } const r = DB.requestRegistration({ name, username, password, phone, email, role: 'cashier' }); if (r.success) { this.showToast(r.message, 'success'); this.showLoginForm(); } else this.showToast(r.message, 'error'); },
+    login() { const username = document.getElementById('username').value, password = document.getElementById('password').value; if (!username || !password) { this.showToast('أدخل اسم المستخدم وكلمة المرور', 'error'); return; } const r = DB.authenticateUser(username, password); if (!r) { this.showToast('خطأ في البيانات', 'error'); return; } if (r.error === 'pending') { this.showToast('الحساب قيد المراجعة', 'error'); return; } if (r.error === 'must_change_password') { this.showForcePasswordChange(r.user); return; } DB.data.currentUser = r.user; document.getElementById('loginScreen').classList.add('hidden'); document.getElementById('mainDashboard').classList.remove('hidden'); document.getElementById('userNameDisplay').textContent = r.user.name; this.renderSidebar(); this.updateDashboard(); this.loadProducts(); this.loadBranches(); if (DB.isDeveloper(r.user)) setTimeout(() => this.showToast('👨‍💻 مرحباً بك يا مطور!', 'success'), 500); },
+    showForcePasswordChange(user) { const p = prompt('⚠️ غير كلمة المرور (6 أحرف):'); if (!p || p.length < 6) { alert('كلمة مرور قصيرة'); this.showForcePasswordChange(user); return; } if (p !== prompt('تأكيد:')) { alert('غير متطابقة'); this.showForcePasswordChange(user); return; } if (DB.forceAdminPasswordChange(p)) { this.showToast('تم التغيير', 'success'); const r = DB.authenticateUser(user.username, p); if (r.success) { DB.data.currentUser = r.user; document.getElementById('loginScreen').classList.add('hidden'); document.getElementById('mainDashboard').classList.remove('hidden'); this.renderSidebar(); this.updateDashboard(); } } },
     logout() { DB.data.currentUser = null; document.getElementById('mainDashboard').classList.add('hidden'); document.getElementById('loginScreen').classList.remove('hidden'); this.cart = []; },
-    renderSidebar() {
-        const nav = document.getElementById('sidebarNav');
-        let h = `<a class="nav-item active" onclick="app.showSection('dashboard')"><i class="fas fa-chart-pie"></i><span>لوحة التحكم</span></a>
-                 <a class="nav-item" onclick="app.showSection('cashier')"><i class="fas fa-cash-register"></i><span>الكاشير</span></a>`;
-        if (!DB.data.currentUser || DB.data.currentUser.role !== 'cashier') {
-            h += `<div class="nav-group"><div class="nav-group-title">إدارة المخزون</div><a class="nav-item" onclick="app.showSection('inventory')"><i class="fas fa-boxes"></i><span>الجرد والمنتجات</span></a><a class="nav-item" onclick="app.showSection('stockControl')"><i class="fas fa-chart-line"></i><span>مراقبة المخزون</span></a></div>
-                  <div class="nav-group"><div class="nav-group-title">العملاء</div><a class="nav-item" onclick="app.showSection('customers')"><i class="fas fa-users"></i><span>العملاء والولاء</span></a></div>
-                  <div class="nav-group"><div class="nav-group-title">الموظفين</div><a class="nav-item" onclick="app.showSection('attendance')"><i class="fas fa-clock"></i><span>الحضور والتبس</span></a></div>
-                  <div class="nav-group"><div class="nav-group-title">التقارير</div><a class="nav-item" onclick="app.showSection('reports')"><i class="fas fa-chart-bar"></i><span>التقارير</span></a></div>
-                  <div class="nav-group"><div class="nav-group-title">الإعدادات</div><a class="nav-item" onclick="app.showSection('settings')"><i class="fas fa-cog"></i><span>الإعدادات</span></a></div>`;
-        }
-        nav.innerHTML = h;
-    },
-    showSection(id) {
-        document.querySelectorAll('.section-modern').forEach(s => s.classList.remove('active'));
-        document.getElementById(id).classList.add('active');
-        if (id === 'dashboard') this.updateDashboard();
-        if (id === 'cashier') this.loadProducts();
-        if (id === 'inventory') this.loadInventory();
-        if (id === 'customers') this.loadCustomersTable();
-        if (id === 'attendance') this.loadAttendance();
-        if (id === 'settings') { this.loadRegistrationRequests(); this.loadUsersManagement(); }
-    },
+    renderSidebar() { const nav = document.getElementById('sidebarNav'); let h = `<a class="nav-item active" onclick="app.showSection('dashboard')"><i class="fas fa-chart-pie"></i><span>لوحة التحكم</span></a><a class="nav-item" onclick="app.showSection('cashier')"><i class="fas fa-cash-register"></i><span>الكاشير</span></a>`; if (!DB.data.currentUser || DB.data.currentUser.role !== 'cashier') h += `<div class="nav-group"><div class="nav-group-title">إدارة المخزون</div><a class="nav-item" onclick="app.showSection('inventory')"><i class="fas fa-boxes"></i><span>الجرد والمنتجات</span></a><a class="nav-item" onclick="app.showSection('stockControl')"><i class="fas fa-chart-line"></i><span>مراقبة المخزون</span></a></div><div class="nav-group"><div class="nav-group-title">العملاء</div><a class="nav-item" onclick="app.showSection('customers')"><i class="fas fa-users"></i><span>العملاء والولاء</span></a></div><div class="nav-group"><div class="nav-group-title">الموظفين</div><a class="nav-item" onclick="app.showSection('attendance')"><i class="fas fa-clock"></i><span>الحضور والتبس</span></a></div><div class="nav-group"><div class="nav-group-title">التقارير</div><a class="nav-item" onclick="app.showSection('reports')"><i class="fas fa-chart-bar"></i><span>التقارير</span></a></div><div class="nav-group"><div class="nav-group-title">الإعدادات</div><a class="nav-item" onclick="app.showSection('settings')"><i class="fas fa-cog"></i><span>الإعدادات</span></a></div>`; nav.innerHTML = h; },
+    showSection(id) { document.querySelectorAll('.section-modern').forEach(s => s.classList.remove('active')); document.getElementById(id).classList.add('active'); if (id === 'dashboard') this.updateDashboard(); if (id === 'cashier') this.loadProducts(); if (id === 'inventory') this.loadInventory(); if (id === 'stockControl') this.loadStockControl(); if (id === 'customers') this.loadCustomersTable(); if (id === 'attendance') this.loadAttendance(); if (id === 'settings') { this.loadRegistrationRequests(); this.loadUsersManagement(); } },
     toggleSidebar() { document.getElementById('sidebar').classList.toggle('active'); },
     toggleUserMenu() { document.getElementById('userMenu').classList.toggle('hidden'); },
     toggleTheme() { document.body.classList.toggle('dark-mode'); localStorage.setItem('darkMode', document.body.classList.contains('dark-mode')); },
-    setPaymentMethod(m) {
-        this.currentPaymentMethod = m;
-        document.querySelectorAll('.payment-method').forEach(el => el.classList.remove('active'));
-        document.getElementById(m === 'cash' ? 'cashMethod' : 'cardMethod').classList.add('active');
-        document.getElementById('cardPaymentDetails').style.display = m === 'card' ? 'block' : 'none';
-    },
-    loadProducts() {
-        const grid = document.getElementById('productsGrid');
-        if (!grid) return;
-        const products = DB.getProducts();
-        grid.innerHTML = products.map(p => `<div class="product-card" onclick="app.addToCart('${p.id}')"><h4>${p.name}</h4><div class="price">${p.price.toFixed(2)} ج.م</div><small>${p.stock} قطعة</small></div>`).join('');
-        document.getElementById('categoryTabs').innerHTML = DB.data.categories.map(c => `<button class="category-tab" onclick="app.filterProducts('${c.id}')">${c.name}</button>`).join('');
-    },
-    filterProducts(catId) {
-        const products = catId === 'all' ? DB.getProducts() : DB.getProducts().filter(p => p.categoryId === catId);
-        document.getElementById('productsGrid').innerHTML = products.map(p => `<div class="product-card" onclick="app.addToCart('${p.id}')"><h4>${p.name}</h4><div class="price">${p.price.toFixed(2)} ج.م</div><small>${p.stock} قطعة</small></div>`).join('');
-    },
-    addToCart(pid) {
-        const p = DB.getProducts().find(p => p.id === pid);
-        if (!p) { this.showToast('المنتج غير موجود', 'error'); return; }
-        if (p.stock <= 0) { this.showToast(`المنتج "${p.name}" غير متوفر حالياً`, 'error'); return; }
-        const ex = this.cart.find(i => i.id === pid);
-        const currentQty = ex ? ex.quantity : 0;
-        if (currentQty + 1 > p.stock) { this.showToast(`الكمية غير متوفرة!\n${p.name}\nالمطلوب: ${currentQty + 1}\nالمتاح: ${p.stock}`, 'error'); return; }
-        if (ex) { ex.quantity++; } else { this.cart.push({ id: p.id, name: p.name, price: p.price, quantity: 1 }); }
-        this.updateCartDisplay(); localStorage.setItem('currentCart', JSON.stringify(this.cart));
-    },
-    updateCartItemQuantity(idx, delta) {
-        const item = this.cart[idx];
-        const p = DB.getProducts().find(p => p.id === item.id);
-        const newQty = item.quantity + delta;
-        if (newQty <= 0) { this.cart.splice(idx, 1); }
-        else if (newQty > p.stock) { this.showToast(`الكمية غير متوفرة!\n${p.name}\nالمطلوب: ${newQty}\nالمتاح: ${p.stock}`, 'error'); return; }
-        else { this.cart[idx].quantity = newQty; }
-        this.updateCartDisplay(); localStorage.setItem('currentCart', JSON.stringify(this.cart));
-    },
+    setPaymentMethod(m) { this.currentPaymentMethod = m; document.querySelectorAll('.payment-method').forEach(el => el.classList.remove('active')); document.getElementById(m === 'cash' ? 'cashMethod' : 'cardMethod').classList.add('active'); document.getElementById('cardPaymentDetails').style.display = m === 'card' ? 'block' : 'none'; },
+    loadProducts() { const grid = document.getElementById('productsGrid'); if (!grid) return; const products = DB.getProducts(); grid.innerHTML = products.map(p => `<div class="product-card" onclick="app.addToCart('${p.id}')"><h4>${p.name}</h4><div class="price">${p.price.toFixed(2)} ج.م</div><small>${p.stock} قطعة</small></div>`).join(''); document.getElementById('categoryTabs').innerHTML = DB.data.categories.map(c => `<button class="category-tab" onclick="app.filterProducts('${c.id}')">${c.name}</button>`).join(''); },
+    filterProducts(catId) { const products = catId === 'all' ? DB.getProducts() : DB.getProducts().filter(p => p.categoryId === catId); document.getElementById('productsGrid').innerHTML = products.map(p => `<div class="product-card" onclick="app.addToCart('${p.id}')"><h4>${p.name}</h4><div class="price">${p.price.toFixed(2)} ج.م</div><small>${p.stock} قطعة</small></div>`).join(''); },
+    addToCart(pid) { const p = DB.getProducts().find(p => p.id === pid); if (!p || p.stock <= 0) { this.showToast('المنتج غير متوفر', 'error'); return; } const ex = this.cart.find(i => i.id === pid); if (ex && ex.quantity + 1 > p.stock) { this.showToast(`الكمية غير متوفرة! المتاح: ${p.stock}`, 'error'); return; } ex ? ex.quantity++ : this.cart.push({ id: p.id, name: p.name, price: p.price, quantity: 1 }); this.updateCartDisplay(); localStorage.setItem('currentCart', JSON.stringify(this.cart)); },
+    updateCartItemQuantity(idx, delta) { const item = this.cart[idx], p = DB.getProducts().find(p => p.id === item.id); const q = item.quantity + delta; if (q <= 0) this.cart.splice(idx, 1); else if (q > p.stock) { this.showToast(`الكمية غير متوفرة! المتاح: ${p.stock}`, 'error'); return; } else this.cart[idx].quantity = q; this.updateCartDisplay(); localStorage.setItem('currentCart', JSON.stringify(this.cart)); },
     removeCartItem(idx) { this.cart.splice(idx, 1); this.updateCartDisplay(); localStorage.setItem('currentCart', JSON.stringify(this.cart)); },
-    updateCartDisplay() {
-        const c = document.getElementById('cartItemsPro');
-        if (!c) return;
-        if (!this.cart.length) { c.innerHTML = '<div style="padding:20px;text-align:center;">السلة فارغة</div>'; this.updateCartSummary(); return; }
-        c.innerHTML = this.cart.map((item, i) => `<div style="display:flex;justify-content:space-between;padding:10px;"><div><strong>${item.name}</strong><br><small>${item.price.toFixed(2)} × ${item.quantity}</small></div><div><button onclick="app.updateCartItemQuantity(${i},-1)">-</button><span style="margin:0 10px;">${item.quantity}</span><button onclick="app.updateCartItemQuantity(${i},1)">+</button><button onclick="app.removeCartItem(${i})" style="margin-right:10px;color:red;">🗑️</button></div></div>`).join('');
-        this.updateCartSummary();
-    },
+    updateCartDisplay() { const c = document.getElementById('cartItemsPro'); if (!c) return; if (!this.cart.length) { c.innerHTML = '<div style="padding:20px;text-align:center;">السلة فارغة</div>'; this.updateCartSummary(); return; } c.innerHTML = this.cart.map((item, i) => `<div style="display:flex;justify-content:space-between;padding:10px;"><div><strong>${item.name}</strong><br><small>${item.price.toFixed(2)} × ${item.quantity}</small></div><div><button onclick="app.updateCartItemQuantity(${i},-1)">-</button><span style="margin:0 10px;">${item.quantity}</span><button onclick="app.updateCartItemQuantity(${i},1)">+</button><button onclick="app.removeCartItem(${i})" style="margin-right:10px;color:red;">🗑️</button></div></div>`).join(''); this.updateCartSummary(); },
     updateCartSummary() { const sub = this.cart.reduce((s, i) => s + i.price * i.quantity, 0), tax = sub * (DB.data.settings.taxRate / 100), total = sub + tax; document.getElementById('cartSubtotal').textContent = `${sub.toFixed(2)} ج.م`; document.getElementById('cartTax').textContent = `${tax.toFixed(2)} ج.م`; document.getElementById('cartTotal').textContent = `${total.toFixed(2)} ج.م`; },
     clearCart() { this.cart = []; this.updateCartDisplay(); localStorage.removeItem('currentCart'); },
     loadCartFromStorage() { const saved = localStorage.getItem('currentCart'); if (saved) { this.cart = JSON.parse(saved); this.updateCartDisplay(); } },
-    searchCustomer() { const phone = document.getElementById('customerPhone').value; if (!phone) return; const c = DB.getCustomerByPhone(phone); if (c) { this.currentCustomer = c; document.getElementById('customerDetails').innerHTML = `<div style="padding:10px;background:#e8f5e9;border-radius:8px;"><strong>${c.name}</strong><br>📞 ${c.phone}<br>⭐ ${c.points} نقطة</div>`; document.getElementById('customerDetails').classList.remove('hidden'); } else { this.showToast('عميل جديد - سيتم إضافته عند البيع', 'success'); } },
+    searchCustomer() { const phone = document.getElementById('customerPhone').value; if (!phone) return; const c = DB.getCustomerByPhone(phone); if (c) { this.currentCustomer = c; document.getElementById('customerDetails').innerHTML = `<div style="padding:10px;background:#e8f5e9;border-radius:8px;"><strong>${c.name}</strong><br>📞 ${c.phone}<br>⭐ ${c.points} نقطة</div>`; document.getElementById('customerDetails').classList.remove('hidden'); } else this.showToast('عميل جديد', 'success'); },
     calculateChangePro() { const sub = this.cart.reduce((s, i) => s + i.price * i.quantity, 0), tax = sub * (DB.data.settings.taxRate / 100), total = sub + tax, cash = parseFloat(document.getElementById('cashAmount').value); if (isNaN(cash)) { this.showToast('أدخل المبلغ', 'error'); return; } document.getElementById('changeAmount').innerHTML = cash < total ? `<div style="color:red;">المبلغ غير كافٍ! المطلوب: ${total.toFixed(2)}</div>` : `<div style="color:green;">الباقي: ${(cash - total).toFixed(2)} ج.م</div>`; },
-    completeSalePro() {
-        if (!this.cart.length) { this.showToast('السلة فارغة', 'error'); return; }
-        for (const item of this.cart) {
-            const p = DB.getProducts().find(p => p.id === item.id);
-            if (!p) { this.showToast(`المنتج ${item.name} غير موجود`, 'error'); return; }
-            if (p.stock < item.quantity) { this.showToast(`❌ الكمية غير متوفرة: ${item.name}\nالمطلوب: ${item.quantity}\nالمتاح: ${p.stock}`, 'error'); return; }
-        }
-        const sub = this.cart.reduce((s, i) => s + i.price * i.quantity, 0), tax = sub * (DB.data.settings.taxRate / 100), total = sub + tax;
-        if (this.currentPaymentMethod === 'cash') { const cash = parseFloat(document.getElementById('cashAmount').value); if (isNaN(cash) || cash < total) { this.showToast('المبلغ المدفوع غير صحيح', 'error'); return; } }
-        this.cart.forEach(i => { const p = DB.getProducts().find(p => p.id === i.id); if (p) p.stock -= i.quantity; });
-        const sale = { items: this.cart, subtotal: sub, tax, total, paid: this.currentPaymentMethod === 'cash' ? parseFloat(document.getElementById('cashAmount').value) : total, change: this.currentPaymentMethod === 'cash' ? parseFloat(document.getElementById('cashAmount').value) - total : 0, paymentMethod: this.currentPaymentMethod };
-        if (this.currentCustomer) { sale.customerId = this.currentCustomer.id; this.currentCustomer.totalPurchases = (this.currentCustomer.totalPurchases || 0) + total; this.currentCustomer.points = (this.currentCustomer.points || 0) + Math.floor(total); this.currentCustomer.lastVisit = new Date().toISOString(); }
-        DB.addSale(sale); DB.save();
-        receipt.show(sale);
-        this.showToast(`✅ تم البيع بنجاح! الإجمالي: ${total.toFixed(2)} ج.م`, 'success');
-        this.clearCart(); this.loadProducts(); this.currentCustomer = null;
-        document.getElementById('customerDetails').classList.add('hidden');
-        document.getElementById('customerPhone').value = '';
-        document.getElementById('cashAmount').value = ''; document.getElementById('changeAmount').innerHTML = 'الباقي: 0.00 ج.م';
-    },
+    completeSalePro() { if (!this.cart.length) { this.showToast('السلة فارغة', 'error'); return; } for (const item of this.cart) { const p = DB.getProducts().find(p => p.id === item.id); if (!p || p.stock < item.quantity) { this.showToast(`الكمية غير متوفرة: ${item.name}`, 'error'); return; } } const sub = this.cart.reduce((s, i) => s + i.price * i.quantity, 0), tax = sub * (DB.data.settings.taxRate / 100), total = sub + tax; if (this.currentPaymentMethod === 'cash') { const cash = parseFloat(document.getElementById('cashAmount').value); if (isNaN(cash) || cash < total) { this.showToast('المبلغ غير صحيح', 'error'); return; } } this.cart.forEach(i => { const p = DB.getProducts().find(p => p.id === i.id); if (p) p.stock -= i.quantity; }); const sale = { items: this.cart, subtotal: sub, tax, total, paid: this.currentPaymentMethod === 'cash' ? parseFloat(document.getElementById('cashAmount').value) : total, change: this.currentPaymentMethod === 'cash' ? parseFloat(document.getElementById('cashAmount').value) - total : 0, paymentMethod: this.currentPaymentMethod }; if (this.currentCustomer) { sale.customerId = this.currentCustomer.id; this.currentCustomer.totalPurchases = (this.currentCustomer.totalPurchases || 0) + total; this.currentCustomer.points = (this.currentCustomer.points || 0) + Math.floor(total); } DB.addSale(sale); receipt.show(sale); this.showToast(`✅ تم البيع! ${total.toFixed(2)} ج.م`, 'success'); this.clearCart(); this.loadProducts(); this.currentCustomer = null; document.getElementById('customerDetails').classList.add('hidden'); document.getElementById('cashAmount').value = ''; document.getElementById('changeAmount').innerHTML = 'الباقي: 0.00 ج.م'; },
     loadInventory() { const t = document.getElementById('inventoryTableBody'); if (!t) return; t.innerHTML = DB.getProducts().map(p => `<tr><td>${p.barcode}</td><td>${p.name}</td><td>${DB.data.categories.find(c => c.id === p.categoryId)?.name || '-'}</td><td>${p.price.toFixed(2)}</td><td>${p.stock}</td><td style="color:${p.stock <= p.minStock ? 'red' : 'green'}">${p.stock <= p.minStock ? '⚠️ ناقص' : '✓ جيد'}</td><td><button onclick="app.deleteProduct('${p.id}')" style="background:#e74c3c;color:white;border:none;padding:5px 10px;">🗑️</button></td></tr>`).join(''); },
     showAddProductForm() { document.getElementById('addProductForm').style.display = 'block'; document.getElementById('newCategory').innerHTML = DB.data.categories.map(c => `<option value="${c.id}">${c.name}</option>`).join(''); },
     hideAddProductForm() { document.getElementById('addProductForm').style.display = 'none'; },
@@ -182,83 +148,30 @@ const app = {
     saveNewCustomer() { const c = { name: document.getElementById('newCustomerName').value, phone: document.getElementById('newCustomerPhone').value, email: document.getElementById('newCustomerEmail').value }; if (!c.name || !c.phone) { this.showToast('الاسم والهاتف مطلوبان', 'error'); return; } DB.addCustomer(c); this.hideAddCustomerForm(); this.loadCustomersTable(); this.showToast('✅ تم إضافة العميل', 'success'); },
     loadCustomersTable() { const t = document.getElementById('customersTableBody'); if (!t) return; t.innerHTML = DB.data.customers.filter(c => c.branchId === DB.data.settings.currentBranch).map(c => `<tr><td>${c.name}</td><td>${c.phone}</td><td>${c.points}</td><td>${c.totalPurchases} ج.م</td><td>${c.lastVisit ? new Date(c.lastVisit).toLocaleDateString('ar-EG') : '-'}</td></tr>`).join(''); },
     addEmployee() { const e = { name: document.getElementById('newEmployeeName').value, phone: document.getElementById('newEmployeePhone').value, role: document.getElementById('newEmployeeRole').value, salary: parseFloat(document.getElementById('newEmployeeSalary').value) }; if (!e.name) { this.showToast('اسم الموظف مطلوب', 'error'); return; } DB.addEmployee(e); this.loadAttendance(); this.showToast('✅ تم إضافة الموظف', 'success'); },
-    loadAttendance() {
-        document.getElementById('employeeSelect').innerHTML = DB.data.employees.map(e => `<option value="${e.id}">${e.name} (${e.username || e.role})</option>`).join('');
-        const t = document.getElementById('attendanceTableBody'); if (!t) return;
-        const today = new Date().toISOString().split('T')[0];
-        t.innerHTML = DB.data.attendance.filter(a => a.date === today).map(a => { const e = DB.data.employees.find(emp => emp.id === a.employeeId); return `<tr><td>${e?.name || '-'} ${e?.username ? '(' + e.username + ')' : ''}</td><td>${e?.role || '-'}</td><td>${a.checkIn ? new Date(a.checkIn).toLocaleTimeString('ar-EG') : '-'}</td><td>${a.checkOut ? new Date(a.checkOut).toLocaleTimeString('ar-EG') : '-'}</td><td>${e?.dailyTips?.toFixed(2) || '0.00'} ج.م</td><td>${a.status === 'present' ? '✅ حاضر' : '❌ غائب'}</td><td><button onclick="app.deleteAttendance('${a.id}')">🗑️</button></td></tr>`; }).join('');
-        document.getElementById('totalTipsToday').textContent = DB.calculateTodayTips().toFixed(2);
-    },
+    loadAttendance() { document.getElementById('employeeSelect').innerHTML = DB.data.employees.map(e => `<option value="${e.id}">${e.name} (${e.username || e.role})</option>`).join(''); const t = document.getElementById('attendanceTableBody'); if (!t) return; const today = new Date().toISOString().split('T')[0]; t.innerHTML = DB.data.attendance.filter(a => a.date === today).map(a => { const e = DB.data.employees.find(emp => emp.id === a.employeeId); return `<tr><td>${e?.name || '-'} ${e?.username ? '('+e.username+')' : ''}</td><td>${e?.role || '-'}</td><td>${a.checkIn ? new Date(a.checkIn).toLocaleTimeString('ar-EG') : '-'}</td><td>${a.checkOut ? new Date(a.checkOut).toLocaleTimeString('ar-EG') : '-'}</td><td>${e?.dailyTips?.toFixed(2) || '0.00'} ج.م</td><td>${a.status === 'present' ? '✅ حاضر' : '❌ غائب'}</td><td><button onclick="app.deleteAttendance('${a.id}')">🗑️</button></td></tr>`; }).join(''); document.getElementById('totalTipsToday').textContent = DB.calculateTodayTips().toFixed(2); },
     checkInSelected() { DB.checkIn(document.getElementById('employeeSelect').value); this.loadAttendance(); this.updateDashboard(); this.showToast('✅ تم تسجيل الحضور', 'success'); },
     checkOutSelected() { DB.checkOut(document.getElementById('employeeSelect').value); this.loadAttendance(); this.showToast('✅ تم تسجيل الانصراف', 'success'); },
     deleteAttendance(id) { if (confirm('حذف سجل الحضور؟')) { DB.deleteAttendance(id); this.loadAttendance(); } },
-    distributeTips() { const r = DB.distributeTips(); if (r) { this.showToast(`✅ تم توزيع ${r.total.toFixed(2)} ج.م على ${r.count} موظف`, 'success'); } else { this.showToast('لا يوجد تبس اليوم', 'error'); } this.loadAttendance(); },
-    loadBranches() {
-        const sel = document.getElementById('branchSelect'); const branches = DB.data.branches;
-        if (sel) sel.innerHTML = branches.map(b => `<option value="${b.id}">${b.name}</option>`).join('');
-        document.getElementById('branchSelectLogin').innerHTML = branches.map(b => `<option value="${b.id}">${b.name}</option>`).join('');
-        const curr = branches.find(b => b.id === DB.data.settings.currentBranch);
-        if (curr) document.getElementById('currentBranchName').textContent = curr.name;
-    },
+    distributeTips() { const r = DB.distributeTips(); if (r) this.showToast(`✅ تم توزيع ${r.total.toFixed(2)} ج.م على ${r.count} موظف`, 'success'); else this.showToast('لا يوجد تبس اليوم', 'error'); this.loadAttendance(); },
+    loadBranches() { const sel = document.getElementById('branchSelect'), branches = DB.data.branches; if (sel) sel.innerHTML = branches.map(b => `<option value="${b.id}">${b.name}</option>`).join(''); document.getElementById('branchSelectLogin').innerHTML = branches.map(b => `<option value="${b.id}">${b.name}</option>`).join(''); const curr = branches.find(b => b.id === DB.data.settings.currentBranch); if (curr) document.getElementById('currentBranchName').textContent = curr.name; },
     showBranchModal() { document.getElementById('branchModal').classList.remove('hidden'); },
     closeBranchModal() { document.getElementById('branchModal').classList.add('hidden'); },
     toggleAddBranchForm() { const f = document.getElementById('addBranchForm'); f.style.display = f.style.display === 'none' ? 'block' : 'none'; },
     saveNewBranch() { const name = document.getElementById('newBranchName').value; if (name) { DB.addBranch({ name, address: document.getElementById('newBranchAddress').value, phone: document.getElementById('newBranchPhone').value }); this.loadBranches(); this.closeBranchModal(); } },
     switchBranch() { DB.switchBranch(document.getElementById('branchSelect').value); this.loadBranches(); this.updateDashboard(); this.loadProducts(); this.closeBranchModal(); },
-    generateDailyReport() { const sales = DB.getTodaySales(); document.getElementById('reportResult').innerHTML = `<h4>تقرير اليوم</h4><p>فواتير: ${sales.length}</p><p>إجمالي: ${sales.reduce((s, sale) => s + sale.total, 0).toFixed(2)} ج.م</p>`; },
-    generateWeeklyReport() { const sales = DB.data.sales.filter(s => new Date(s.date) >= new Date(Date.now() - 7*24*60*60*1000)); document.getElementById('reportResult').innerHTML = `<h4>تقرير الأسبوع</h4><p>فواتير: ${sales.length}</p><p>إجمالي: ${sales.reduce((s, sale) => s + sale.total, 0).toFixed(2)} ج.م</p>`; },
-    generateInventoryReport() { const p = DB.getProducts(); document.getElementById('reportResult').innerHTML = `<h4>المخزون</h4><p>منتجات: ${p.length}</p><p>قيمة: ${p.reduce((s, p) => s + p.stock * p.cost, 0).toFixed(2)} ج.م</p>`; },
-    generateCustomersReport() { const c = DB.data.customers.filter(c => c.branchId === DB.data.settings.currentBranch); document.getElementById('reportResult').innerHTML = `<h4>العملاء (${c.length})</h4>` + c.map(c => `<p>${c.name} - ${c.phone} - ${c.points} نقطة</p>`).join(''); },
-    changePassword() { const curr = document.getElementById('currentPassword').value, newP = document.getElementById('newPassword').value, conf = document.getElementById('confirmPassword').value; if (!curr || !newP || !conf) { this.showToast('كل الحقول مطلوبة', 'error'); return; } if (newP !== conf) { this.showToast('كلمة المرور غير متطابقة', 'error'); return; } if (DB.changePassword(DB.data.currentUser.id, curr, newP)) { this.showToast('✅ تم تغيير كلمة المرور', 'success'); } else { this.showToast('❌ كلمة المرور الحالية خطأ', 'error'); } },
+    changePassword() { const curr = document.getElementById('currentPassword').value, newP = document.getElementById('newPassword').value, conf = document.getElementById('confirmPassword').value; if (!curr || !newP || !conf) { this.showToast('كل الحقول مطلوبة', 'error'); return; } if (newP !== conf) { this.showToast('غير متطابقة', 'error'); return; } if (DB.changePassword(DB.data.currentUser.id, curr, newP)) this.showToast('✅ تم التغيير', 'success'); else this.showToast('❌ كلمة المرور الحالية خطأ', 'error'); },
     loadRegistrationRequests() { const c = document.getElementById('registrationRequestsList'); if (!c) return; const reqs = DB.getPendingRegistrations(); if (!reqs.length) { c.innerHTML = '<p>✅ لا توجد طلبات</p>'; return; } c.innerHTML = '<table>' + reqs.map(r => `<tr><td>${r.name}</td><td>${r.username}</td><td><button onclick="app.approveRegistration(\'${r.id}\')">✅ قبول</button><button onclick="app.rejectRegistration(\'${r.id}\')">❌ رفض</button></td></tr>`).join('') + '</table>'; },
-    approveRegistration(id) { DB.approveRegistration(id); this.loadRegistrationRequests(); this.loadUsersManagement(); this.showToast('✅ تمت الموافقة على التسجيل', 'success'); },
+    approveRegistration(id) { DB.approveRegistration(id); this.loadRegistrationRequests(); this.loadUsersManagement(); this.showToast('✅ تمت الموافقة', 'success'); },
     rejectRegistration(id) { DB.rejectRegistration(id); this.loadRegistrationRequests(); },
-    saveSettings() { DB.data.settings.companyName = document.getElementById('storeName').value; DB.data.settings.storePhone = document.getElementById('storePhone').value; DB.data.settings.taxRate = parseFloat(document.getElementById('taxRate').value); DB.save(); this.showToast('✅ تم حفظ الإعدادات', 'success'); },
+    saveSettings() { DB.data.settings.companyName = document.getElementById('storeName').value; DB.data.settings.storePhone = document.getElementById('storePhone').value; DB.data.settings.taxRate = parseFloat(document.getElementById('taxRate').value); DB.save(); DB.pushToFirebase(); this.showToast('✅ تم الحفظ', 'success'); },
     backupData() { const a = document.createElement('a'); a.href = 'data:text/json;charset=utf-8,' + encodeURIComponent(JSON.stringify(DB.data)); a.download = 'backup.json'; a.click(); },
     importData(e) { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = ev => { DB.data = JSON.parse(ev.target.result); DB.save(); location.reload(); }; r.readAsText(f); },
-    showDeveloperInfo() { if (DB.isDeveloper(DB.data.currentUser)) this.showToast('👨‍💻 المطور: Abobakr Assad Mohammed\n🔧 الصلاحيات: كاملة', 'success'); },
+    showDeveloperInfo() { if (DB.isDeveloper(DB.data.currentUser)) this.showToast('👨‍💻 المطور: Abobakr Assad Mohammed', 'success'); },
     closeReceipt() { document.getElementById('receiptModal').classList.add('hidden'); },
     toggleNotifications() { this.showToast('الإشعارات قيد التطوير', 'success'); },
-    
-    // ========== إدارة المستخدمين (للمطور فقط) ==========
-    loadUsersManagement() {
-        const container = document.getElementById('usersManagementList');
-        const section = document.getElementById('userManagementSection');
-        if (DB.isDeveloper(DB.data.currentUser)) { section.style.display = 'block'; }
-        else { section.style.display = 'none'; return; }
-        const users = DB.getAllUsers();
-        if (!users.length) { container.innerHTML = '<p>لا يوجد مستخدمين</p>'; return; }
-        let html = '<table style="width:100%"><tr style="background:#667eea;color:white;"><th>المستخدم</th><th>الاسم</th><th>الدور</th><th>آخر دخول</th><th>حذف</th></tr>';
-        users.forEach(user => {
-            const isDeveloper = user.role === 'developer';
-            html += `<tr><td>${user.username}</td><td>${user.name || '-'}</td><td>${user.role === 'admin' ? '👑 مدير' : user.role === 'developer' ? '👨‍💻 مطور' : '💰 كاشير'}</td><td>${user.lastLogin ? new Date(user.lastLogin).toLocaleString('ar-EG') : 'لم يسجل بعد'}</td>
-                <td>${!isDeveloper ? `<button onclick="app.deleteUser('${user.id}')" style="background:#e74c3c;color:white;border:none;padding:5px 10px;border-radius:5px;">🗑️</button>` : '<span>محمي</span>'}</td></tr>`;
-        });
-        html += '</table>'; container.innerHTML = html;
-    },
-    deleteUser(userId) {
-        const user = DB.getAllUsers().find(u => u.id === userId);
-        if (!user) { this.showToast('المستخدم غير موجود', 'error'); return; }
-        if (user.role === 'developer') { this.showToast('❌ لا يمكن حذف حساب المطور', 'error'); return; }
-        if (userId === DB.data.currentUser?.id) { this.showToast('❌ لا يمكنك حذف حسابك الحالي', 'error'); return; }
-        if (!confirm(`⚠️ حذف المستخدم "${user.username}"؟`)) return;
-        if (DB.deleteUser(userId)) { this.showToast('✅ تم حذف المستخدم', 'success'); this.loadUsersManagement(); this.loadAttendance(); }
-    },
-    kickAllUsers() {
-        if (!DB.isDeveloper(DB.data.currentUser)) { this.showToast('❌ للمطور فقط', 'error'); return; }
-        if (!confirm('⚠️ طرد جميع المستخدمين؟')) return;
-        const currentUserId = DB.data.currentUser?.id;
-        const sessions = JSON.parse(localStorage.getItem('activeSessions') || '[]');
-        const currentSession = sessions.find(s => s.userId === currentUserId);
-        localStorage.setItem('activeSessions', JSON.stringify(currentSession ? [currentSession] : []));
-        this.showToast('✅ تم طرد جميع المستخدمين', 'success');
-    },
-    resetEverything() {
-        if (!confirm('⚠️ تحذير نهائي!\n\nهذا الإجراء سيحذف جميع البيانات!\nهل أنت متأكد؟')) return;
-        if (!confirm('آخر تأكيد: هل تريد فعلاً مسح كل شيء؟')) return;
-        localStorage.removeItem('supermarketDB'); localStorage.removeItem('currentCart'); localStorage.removeItem('lastResetDate'); localStorage.removeItem('activeSessions');
-        this.showToast('✅ تم مسح جميع البيانات!', 'success');
-        setTimeout(() => location.reload(), 1500);
-    }
+    loadUsersManagement() { const c = document.getElementById('usersManagementList'), s = document.getElementById('userManagementSection'); if (DB.isDeveloper(DB.data.currentUser)) s.style.display = 'block'; else { s.style.display = 'none'; return; } const users = DB.getAllUsers(); if (!users.length) { c.innerHTML = '<p>لا يوجد مستخدمين</p>'; return; } let h = '<table><tr style="background:#667eea;color:white;"><th>المستخدم</th><th>الاسم</th><th>الدور</th><th>آخر دخول</th><th>حذف</th></tr>'; users.forEach(u => { const isDev = u.role === 'developer'; h += `<tr><td>${u.username}</td><td>${u.name||'-'}</td><td>${u.role==='admin'?'👑 مدير':u.role==='developer'?'👨‍💻 مطور':'💰 كاشير'}</td><td>${u.lastLogin?new Date(u.lastLogin).toLocaleString('ar-EG'):'لم يسجل'}</td><td>${!isDev?`<button onclick="app.deleteUser('${u.id}')" style="background:#e74c3c;color:white;border:none;padding:5px 10px;">🗑️</button>`:'<span>محمي</span>'}</td></tr>`; }); h += '</table>'; c.innerHTML = h; },
+    deleteUser(id) { const u = DB.getAllUsers().find(u => u.id === id); if (!u || u.role === 'developer') { this.showToast('لا يمكن حذف المطور', 'error'); return; } if (id === DB.data.currentUser?.id) { this.showToast('لا يمكن حذف نفسك', 'error'); return; } if (!confirm(`حذف ${u.username}؟`)) return; if (DB.deleteUser(id)) { this.showToast('✅ تم الحذف', 'success'); this.loadUsersManagement(); } },
+    kickAllUsers() { if (!DB.isDeveloper(DB.data.currentUser)) return; if (!confirm('طرد جميع المستخدمين؟')) return; const curr = DB.data.currentUser?.id; const sessions = JSON.parse(localStorage.getItem('activeSessions')||'[]'); localStorage.setItem('activeSessions', JSON.stringify(sessions.filter(s => s.userId === curr))); this.showToast('✅ تم طرد الجميع', 'success'); },
+    resetEverything() { if (!confirm('⚠️ مسح جميع البيانات؟')) return; if (!confirm('تأكيد نهائي؟')) return; localStorage.removeItem('supermarketDB'); localStorage.removeItem('currentCart'); localStorage.removeItem('lastResetDate'); this.showToast('✅ تم المسح', 'success'); setTimeout(() => location.reload(), 1500); }
 };
 window.addEventListener('DOMContentLoaded', () => app.init());
