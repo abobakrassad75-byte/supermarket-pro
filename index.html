@@ -12,6 +12,10 @@
     <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'%3E%3Ccircle cx='96' cy='96' r='96' fill='%23667eea'/%3E%3Ctext x='96' y='120' font-size='60' font-family='Arial' font-weight='bold' fill='%23ffffff' text-anchor='middle'%3E🏪%3C/text%3E%3C/svg%3E">
     <meta name="theme-color" content="#667eea">
     
+    <!-- Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+    
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
@@ -28,10 +32,7 @@
             cursor: pointer;
             transition: all 0.3s;
         }
-        .payment-method.active {
-            background: #667eea;
-            color: white;
-        }
+        .payment-method.active { background: #667eea; color: white; }
         .payment-method input { display: none; }
         .payment-method i { display: block; font-size: 24px; margin-bottom: 5px; }
         
@@ -47,10 +48,7 @@
             transition: all 0.3s;
             cursor: pointer;
         }
-        .nav-item.active {
-            background: linear-gradient(90deg, #667eea, #764ba2);
-            color: white;
-        }
+        .nav-item.active { background: linear-gradient(90deg, #667eea, #764ba2); color: white; }
         .nav-item.active i { color: white; }
         
         .product-card {
@@ -61,11 +59,7 @@
             cursor: pointer;
             transition: all 0.3s;
         }
-        .product-card:hover {
-            background: #667eea;
-            color: white;
-            transform: scale(1.05);
-        }
+        .product-card:hover { background: #667eea; color: white; transform: scale(1.05); }
         
         .install-banner {
             position: fixed;
@@ -117,8 +111,8 @@
             background: white;
             border-radius: 15px;
             padding: 20px;
-            max-width: 500px;
-            max-height: 400px;
+            max-width: 600px;
+            max-height: 500px;
             overflow-y: auto;
             width: 90%;
         }
@@ -214,7 +208,6 @@
             font-weight: 600;
         }
         
-        /* Toast Notification */
         #toast {
             position: fixed;
             bottom: 30px;
@@ -233,14 +226,46 @@
             font-weight: 600;
             white-space: nowrap;
         }
+        #toast.success { background: #27ae60; }
+        #toast i { font-size: 20px; }
         
-        #toast.success {
-            background: #27ae60;
+        .invoice-detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+        .invoice-detail-header {
+            background: #667eea;
+            color: white;
+            padding: 10px;
+            border-radius: 8px;
+            margin-bottom: 15px;
         }
         
-        #toast i {
-            font-size: 20px;
+        .report-card {
+            cursor: pointer;
+            transition: all 0.3s;
         }
+        .report-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+        }
+        
+        .connection-status {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-size: 12px;
+            z-index: 9999;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .connection-status.online { background: #27ae60; color: white; }
+        .connection-status.offline { background: #e74c3c; color: white; }
     </style>
 </head>
 <body>
@@ -264,12 +289,12 @@
                     <div id="loginForm">
                         <div class="input-group-modern">
                             <i class="fas fa-user"></i>
-                            <input type="text" id="username" placeholder="اسم المستخدم">
+                            <input type="text" id="username" placeholder="اسم المستخدم" value="admin">
                             <span class="input-highlight"></span>
                         </div>
                         <div class="input-group-modern">
                             <i class="fas fa-lock"></i>
-                            <input type="password" id="password" placeholder="كلمة المرور">
+                            <input type="password" id="password" placeholder="كلمة المرور" value="admin123">
                             <i class="fas fa-eye toggle-password" onclick="app.togglePassword('password')"></i>
                             <span class="input-highlight"></span>
                         </div>
@@ -408,7 +433,6 @@
                     <i class="fas fa-store"></i>
                     <h3>سوبر ماركت برو</h3>
                 </div>
-                
                 <nav class="sidebar-nav" id="sidebarNav"></nav>
             </div>
             
@@ -591,10 +615,81 @@
                 <!-- مراقبة المخزون -->
                 <div id="stockControl" class="section-modern">
                     <h3><i class="fas fa-chart-line"></i> مراقبة المخزون</h3>
+                    
                     <div class="reports-grid">
-                        <div class="report-card"><i class="fas fa-exclamation-triangle" style="color: #e74c3c;"></i><h4>منتجات تحت الحد الأدنى</h4><div id="lowStockList"></div></div>
-                        <div class="report-card"><i class="fas fa-chart-bar"></i><h4>المنتجات الأكثر مبيعاً</h4><div id="topSellingList"></div></div>
-                        <div class="report-card"><i class="fas fa-calendar"></i><h4>منتجات قاربت على الانتهاء</h4><div id="expiringList"></div></div>
+                        <div class="report-card" onclick="app.showLowStockDetails()">
+                            <i class="fas fa-exclamation-triangle" style="color: #e74c3c;"></i>
+                            <h4>منتجات تحت الحد الأدنى</h4>
+                            <p style="font-size: 12px; color: #666;">اضغط للتفاصيل</p>
+                            <div id="lowStockCount" style="font-size: 24px; font-weight: bold; color: #e74c3c;">0</div>
+                        </div>
+                        
+                        <div class="report-card" onclick="app.showTopSellingDetails()">
+                            <i class="fas fa-chart-bar" style="color: #3498db;"></i>
+                            <h4>المنتجات الأكثر مبيعاً</h4>
+                            <p style="font-size: 12px; color: #666;">اضغط للتفاصيل</p>
+                            <div id="topSellingPreview" style="margin-top: 10px;"></div>
+                        </div>
+                        
+                        <div class="report-card" onclick="app.showExpiringProducts()">
+                            <i class="fas fa-calendar-alt" style="color: #f39c12;"></i>
+                            <h4>منتجات تحتاج إعادة طلب</h4>
+                            <p style="font-size: 12px; color: #666;">اضغط للتفاصيل</p>
+                            <div id="reorderPreview" style="margin-top: 10px;"></div>
+                        </div>
+                        
+                        <div class="report-card" onclick="app.showInventoryValueDetails()">
+                            <i class="fas fa-coins" style="color: #27ae60;"></i>
+                            <h4>قيمة المخزون</h4>
+                            <p style="font-size: 12px; color: #666;">اضغط للتفاصيل</p>
+                            <div id="inventoryValuePreview" style="font-size: 24px; font-weight: bold; color: #27ae60;">0 ج.م</div>
+                        </div>
+                        
+                        <div class="report-card" onclick="app.showStockMovement()">
+                            <i class="fas fa-exchange-alt" style="color: #9b59b6;"></i>
+                            <h4>حركة المخزون</h4>
+                            <p style="font-size: 12px; color: #666;">اضغط للتفاصيل</p>
+                            <div id="stockMovementPreview" style="margin-top: 10px;"></div>
+                        </div>
+                        
+                        <div class="report-card" onclick="app.showMostProfitableProducts()">
+                            <i class="fas fa-trophy" style="color: #f1c40f;"></i>
+                            <h4>المنتجات الأكثر ربحية</h4>
+                            <p style="font-size: 12px; color: #666;">اضغط للتفاصيل</p>
+                            <div id="profitablePreview" style="margin-top: 10px;"></div>
+                        </div>
+                    </div>
+                    
+                    <div style="margin-top: 30px; background: white; border-radius: 10px; padding: 20px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
+                            <h4><i class="fas fa-boxes"></i> جميع المنتجات</h4>
+                            <div>
+                                <input type="text" id="stockSearchInput" placeholder="🔍 بحث في المنتجات..." style="padding: 8px 15px; border-radius: 20px; border: 1px solid #ddd; width: 250px;" onkeyup="app.filterStockTable()">
+                                <select id="stockCategoryFilter" onchange="app.filterStockTable()" style="padding: 8px; border-radius: 8px; border: 1px solid #ddd; margin-right: 10px;">
+                                    <option value="all">كل الفئات</option>
+                                </select>
+                            </div>
+                        </div>
+                        
+                        <div style="overflow-x: auto;">
+                            <table style="width: 100%; min-width: 800px;">
+                                <thead>
+                                    <tr style="background: #667eea; color: white;">
+                                        <th>الباركود</th>
+                                        <th>المنتج</th>
+                                        <th>الفئة</th>
+                                        <th>المخزون</th>
+                                        <th>الحد الأدنى</th>
+                                        <th>سعر التكلفة</th>
+                                        <th>سعر البيع</th>
+                                        <th>الربح</th>
+                                        <th>قيمة المخزون</th>
+                                        <th>الحالة</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="stockTableBody"></tbody>
+                            </table>
+                        </div>
                     </div>
                 </div>
                 
@@ -657,14 +752,45 @@
                 
                 <!-- التقارير -->
                 <div id="reports" class="section-modern">
-                    <h3><i class="fas fa-chart-bar"></i> التقارير</h3>
+                    <h3><i class="fas fa-chart-bar"></i> التقارير المتقدمة</h3>
+                    
                     <div class="reports-grid">
-                        <div class="report-card"><i class="fas fa-calendar-day"></i><h4>تقرير المبيعات اليومي</h4><button onclick="app.generateDailyReport()" class="btn-primary-modern">عرض</button></div>
-                        <div class="report-card"><i class="fas fa-calendar-week"></i><h4>تقرير المبيعات الأسبوعي</h4><button onclick="app.generateWeeklyReport()" class="btn-primary-modern">عرض</button></div>
-                        <div class="report-card"><i class="fas fa-box"></i><h4>تقرير المخزون</h4><button onclick="app.generateInventoryReport()" class="btn-primary-modern">عرض</button></div>
-                        <div class="report-card"><i class="fas fa-users"></i><h4>تقرير العملاء</h4><button onclick="app.generateCustomersReport()" class="btn-primary-modern">عرض</button></div>
+                        <div class="report-card">
+                            <i class="fas fa-calendar-day"></i>
+                            <h4>تقرير المبيعات اليومي</h4>
+                            <p style="font-size:12px;color:#666;">تفاصيل كاملة للمبيعات</p>
+                            <button onclick="app.generateDetailedDailyReport()" class="btn-primary-modern">عرض</button>
+                        </div>
+                        <div class="report-card">
+                            <i class="fas fa-calendar-week"></i>
+                            <h4>تقرير المبيعات الأسبوعي</h4>
+                            <p style="font-size:12px;color:#666;">ملخص الأسبوع</p>
+                            <button onclick="app.generateWeeklyReport()" class="btn-primary-modern">عرض</button>
+                        </div>
+                        <div class="report-card">
+                            <i class="fas fa-box"></i>
+                            <h4>تقرير المخزون</h4>
+                            <p style="font-size:12px;color:#666;">حالة المخزون الكاملة</p>
+                            <button onclick="app.generateDetailedInventoryReport()" class="btn-primary-modern">عرض</button>
+                        </div>
+                        <div class="report-card">
+                            <i class="fas fa-users"></i>
+                            <h4>تقرير العملاء</h4>
+                            <p style="font-size:12px;color:#666;">تحليل العملاء</p>
+                            <button onclick="app.generateDetailedCustomersReport()" class="btn-primary-modern">عرض</button>
+                        </div>
                     </div>
-                    <div id="reportResult" style="margin-top: 20px; background: white; border-radius: 10px; padding: 20px;"></div>
+                    
+                    <div style="margin:20px 0;display:flex;gap:10px;justify-content:center;">
+                        <button onclick="app.exportReportAsPDF()" class="btn-secondary-modern">
+                            <i class="fas fa-file-pdf"></i> تصدير PDF
+                        </button>
+                        <button onclick="app.exportReportAsExcel()" class="btn-secondary-modern">
+                            <i class="fas fa-file-excel"></i> تصدير Excel
+                        </button>
+                    </div>
+                    
+                    <div id="reportResult" style="margin-top:20px;background:white;border-radius:10px;padding:20px;"></div>
                 </div>
                 
                 <!-- الإعدادات -->
@@ -692,7 +818,6 @@
                         <div id="registrationRequestsList"></div>
                     </div>
                     
-                    <!-- قسم إدارة المستخدمين (للمطور فقط) -->
                     <div id="userManagementSection" class="setting-card" style="display: none;">
                         <h4><i class="fas fa-users-cog"></i> إدارة المستخدمين</h4>
                         <p style="color: #e74c3c; font-size: 12px; margin-bottom: 15px;">⚠️ تحذير: حذف المستخدم نهائي ولا يمكن التراجع عنه</p>
@@ -746,6 +871,25 @@
         </div>
     </div>
 
+    <!-- مودال تفاصيل الفاتورة -->
+    <div id="invoiceDetailModal" class="detail-modal hidden">
+        <div class="detail-content" style="max-width: 600px;">
+            <div class="detail-header">
+                <h3 id="invoiceDetailTitle">🧾 تفاصيل الفاتورة</h3>
+                <span class="close-detail" onclick="app.closeInvoiceDetailModal()">&times;</span>
+            </div>
+            <div id="invoiceDetailBody"></div>
+            <div style="margin-top: 20px; display: flex; gap: 10px;">
+                <button onclick="app.printInvoiceFromModal()" class="btn-primary-modern" style="flex:1;">
+                    <i class="fas fa-print"></i> طباعة
+                </button>
+                <button onclick="app.closeInvoiceDetailModal()" class="btn-secondary-modern" style="flex:1;">
+                    إغلاق
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- مودال الفروع -->
     <div id="branchModal" class="branch-modal hidden">
         <div class="branch-content">
@@ -778,6 +922,12 @@
     <div id="toast">
         <i class="fas fa-exclamation-circle"></i>
         <span id="toastMessage"></span>
+    </div>
+    
+    <!-- مؤشر الاتصال -->
+    <div id="connectionStatus" class="connection-status offline">
+        <i class="fas fa-wifi"></i>
+        <span>غير متصل</span>
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
